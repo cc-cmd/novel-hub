@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeTmpDir } from '@/test/helpers';
-import { checkDir, listSubdirs, normalizeRootPath, validateDirPath } from './fs-scan';
+import { checkDir, classifyChapterEntries, listSubdirs, normalizeRootPath, parseChapterFilename, validateDirPath } from './fs-scan';
 
 const cleanups: Array<() => void> = [];
 afterEach(() => cleanups.splice(0).forEach((c) => c()));
@@ -62,5 +62,42 @@ describe('checkDir / listSubdirs', () => {
   it('listSubdirs 忽略隐藏项与文件，按名称排序', () => {
     const d = tmp({ 'b/x.md': '', 'a/x.md': '', '.git/HEAD': '', 'file.txt': '' });
     expect(listSubdirs(d)).toEqual([path.join(d, 'a'), path.join(d, 'b')]);
+  });
+});
+
+describe('parseChapterFilename', () => {
+  it.each([
+    ['Ch01-重生之初.md', 1, '重生之初'],
+    ['ch12-第十二回 夜行.md', 12, '第十二回 夜行'],
+    ['Ch003-标题.md', 3, '标题'],
+    ['CH7-x.MD', 7, 'x'],
+    ['Ch01- 空格标题 .md', 1, '空格标题'],
+  ])('%s', (name, seq, title) => {
+    expect(parseChapterFilename(name)).toEqual({ seq, title });
+  });
+  it.each(['Ch01.md', '第一章.md', 'notes.md', 'Ch01-标题.txt', 'Ch-标题.md', 'Ch01－标题.md', 'Ch01-.md', 'Ch01-  .md'])(
+    '未识别：%s',
+    (name) => expect(parseChapterFilename(name)).toBeNull(),
+  );
+});
+
+describe('classifyChapterEntries', () => {
+  const f = (name: string) => ({ name, isFile: true });
+  it('AC2.1 识别 + 未识别提示；非 md 与目录、隐藏文件静默忽略', () => {
+    const r = classifyChapterEntries([
+      f('Ch01-开端.md'), f('Ch02-发展.md'), f('notes.md'), f('cover.png'), f('._Ch03-x.md'),
+      { name: '_v1', isFile: false },
+    ]);
+    expect(r.chapters.map((c) => c.seq)).toEqual([1, 2]);
+    expect(r.issues).toEqual([{ fileName: 'notes.md', kind: 'unrecognized', reason: '文件名不符合 ChNN-标题.md，未入库' }]);
+  });
+  it('AC2.8 重复序号：字典序第一个生效，其余列冲突', () => {
+    const r = classifyChapterEntries([f('Ch1-b.md'), f('Ch01-a.md')]);
+    expect(r.chapters).toEqual([{ fileName: 'Ch01-a.md', seq: 1, title: 'a' }]);
+    expect(r.issues).toEqual([{ fileName: 'Ch1-b.md', kind: 'duplicate', reason: '序号重复（与 Ch01-a.md 冲突），未入库' }]);
+  });
+  it('结果按 seq 升序', () => {
+    const r = classifyChapterEntries([f('Ch10-j.md'), f('Ch2-b.md')]);
+    expect(r.chapters.map((c) => c.seq)).toEqual([2, 10]);
   });
 });

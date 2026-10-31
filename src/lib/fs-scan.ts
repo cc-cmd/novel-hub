@@ -59,3 +59,55 @@ export function listSubdirs(root: string): string[] {
   }
   return out.sort();
 }
+
+const CHAPTER_RE = /^ch(\d+)-(.+)\.md$/i;
+
+export function parseChapterFilename(name: string): { seq: number; title: string } | null {
+  const m = CHAPTER_RE.exec(name);
+  if (!m) return null;
+  const title = m[2].trim();
+  const seq = parseInt(m[1], 10);
+  if (!title || !Number.isSafeInteger(seq)) return null;
+  return { seq, title };
+}
+
+export interface ParsedChapterFile {
+  fileName: string;
+  seq: number;
+  title: string;
+}
+
+export interface DirIssue {
+  fileName: string;
+  kind: 'unrecognized' | 'duplicate';
+  reason: string;
+}
+
+export function classifyChapterEntries(entries: Array<{ name: string; isFile: boolean }>): {
+  chapters: ParsedChapterFile[];
+  issues: DirIssue[];
+} {
+  const names = entries
+    .filter((e) => e.isFile && !e.name.startsWith('.') && /\.md$/i.test(e.name))
+    .map((e) => e.name)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const chapters: ParsedChapterFile[] = [];
+  const issues: DirIssue[] = [];
+  const bySeq = new Map<number, string>();
+  for (const fileName of names) {
+    const p = parseChapterFilename(fileName);
+    if (!p) {
+      issues.push({ fileName, kind: 'unrecognized', reason: '文件名不符合 ChNN-标题.md，未入库' });
+      continue;
+    }
+    const first = bySeq.get(p.seq);
+    if (first) {
+      issues.push({ fileName, kind: 'duplicate', reason: `序号重复（与 ${first} 冲突），未入库` });
+      continue;
+    }
+    bySeq.set(p.seq, fileName);
+    chapters.push({ fileName, ...p });
+  }
+  chapters.sort((a, b) => a.seq - b.seq);
+  return { chapters, issues };
+}
