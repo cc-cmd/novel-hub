@@ -6,3 +6,8 @@ data/*.db
 data/*.db-*
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# real-chapter fanqie fixtures: private novel text, local only
+src/test/fixtures/fanqie/ch01.*
+src/test/fixtures/fanqie/ch03.*
+src/test/fixtures/fanqie/ch05.*
