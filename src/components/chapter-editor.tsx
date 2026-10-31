@@ -28,6 +28,8 @@ export function ChapterEditor(p: Props) {
   const [conflict, setConflict] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [pending, start] = useTransition();
+  const [reloading, setReloading] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
 
   const disabled = p.fileMissing || !!p.readError;
   const dirty = content !== saved;
@@ -39,6 +41,23 @@ export function ChapterEditor(p: Props) {
     window.addEventListener('beforeunload', h);
     return () => window.removeEventListener('beforeunload', h);
   }, [dirty]);
+
+  // 仅「放弃并重新加载」流程：refresh 完成（refreshing 变 false）后，用新 props 覆盖本地状态
+  useEffect(() => {
+    if (!reloading || refreshing) return;
+    setContent(p.initialContent);
+    setSaved(p.initialContent);
+    setBaseHash(p.initialBaseHash);
+    setConflict(false);
+    setError('');
+    setJustSaved(false);
+    setReloading(false);
+  }, [reloading, refreshing, p.initialContent, p.initialBaseHash]);
+
+  const reload = () => {
+    setReloading(true);
+    startRefresh(() => router.refresh());
+  };
 
   const save = (overwrite = false) =>
     start(async () => {
@@ -80,14 +99,14 @@ export function ChapterEditor(p: Props) {
       {error && (
         <Banner kind="error">
           保存失败，文件未被修改：{error.replace('保存失败，文件未被修改：', '')}{' '}
-          <button className="underline" onClick={() => save()}>重试保存</button>
+          <button className="underline" disabled={pending} onClick={() => save()}>重试保存</button>
         </Banner>
       )}
       {conflict && (
         <Banner kind="warn">
           文件已被外部修改{' '}
-          <button className="underline" onClick={() => save(true)}>覆盖磁盘文件</button>{' '}
-          <button className="underline" onClick={() => router.refresh()}>放弃并重新加载</button>
+          <button className="underline" disabled={pending} onClick={() => save(true)}>覆盖磁盘文件</button>{' '}
+          <button className="underline" onClick={reload}>放弃并重新加载</button>
         </Banner>
       )}
 
