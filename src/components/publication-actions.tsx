@@ -28,6 +28,14 @@ interface Props {
   onOptimistic?: (next: PublishStatus | null) => void;
 }
 
+function Btn({ action, label, danger, pending, onRun }: { action: PubAction; label: string; danger?: boolean; pending: boolean; onRun: (a: PubAction) => void }) {
+  return (
+    <button className={`rounded border px-3 text-sm ${danger ? 'text-red-700' : ''}`} disabled={pending} onClick={() => onRun(action)}>
+      {label}
+    </button>
+  );
+}
+
 export function PublicationActions(p: Props) {
   const router = useRouter();
   const { notify } = useNotice();
@@ -58,29 +66,23 @@ export function PublicationActions(p: Props) {
       router.refresh();
     });
 
-  const Btn = ({ action, label, danger }: { action: PubAction; label: string; danger?: boolean }) => (
-    <button className={`rounded border px-3 text-sm ${danger ? 'text-red-700' : ''}`} disabled={pending} onClick={() => run(action)}>
-      {label}
-    </button>
-  );
-
   if (p.fileMissing) {
     return (
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-stone-600">文件丢失的章节没有可对照的内容，不能标记已发。</span>
-        {p.status !== 'unpublished' && <Btn action="cancel" label="取消已发" danger />}
+        {p.status !== 'unpublished' && <Btn pending={pending} onRun={run} action="cancel" label="取消已发" danger />}
       </div>
     );
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {p.status === 'unpublished' && (<><Btn action="mark_pending" label="标记审核中" /><Btn action="mark_published" label="标记已发布" /></>)}
-      {p.status === 'pending_review' && (<><Btn action="approve" label="标记已发布（审核通过）" /><Btn action="cancel" label="取消" danger /></>)}
+      {p.status === 'unpublished' && (<><Btn pending={pending} onRun={run} action="mark_pending" label="标记审核中" /><Btn pending={pending} onRun={run} action="mark_published" label="标记已发布" /></>)}
+      {p.status === 'pending_review' && (<><Btn pending={pending} onRun={run} action="approve" label="标记已发布（审核通过）" /><Btn pending={pending} onRun={run} action="cancel" label="取消" danger /></>)}
       {p.status === 'published' && (
         <>
-          <Btn action="cancel" label="取消已发" danger />
-          <Btn action="resubmit" label="重新提交（覆盖，进入审核中）" />
-          <Btn action="mark_published" label="标记已发布（更新为当前版本）" />
+          <Btn pending={pending} onRun={run} action="cancel" label="取消已发" danger />
+          <Btn pending={pending} onRun={run} action="resubmit" label="重新提交（覆盖，进入审核中）" />
+          <Btn pending={pending} onRun={run} action="mark_published" label="标记已发布（更新为当前版本）" />
           {p.editHref && <Link className="inline-flex min-h-[44px] items-center rounded border px-3 text-sm" href={p.editHref}>编辑发布信息</Link>}
           {p.platformUrl && (
             <a className="inline-flex min-h-[44px] items-center rounded border px-3 text-sm" href={p.platformUrl} target="_blank" rel="noreferrer">打开链接</a>

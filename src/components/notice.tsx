@@ -24,7 +24,10 @@ export function NoticeProvider({ children }: { children: React.ReactNode }) {
         <div role="status" className={`mx-auto mt-4 flex max-w-6xl items-center gap-3 rounded border px-4 py-2 ${COLORS[n.kind]}`}>
           <span className="flex-1">{n.text}</span>
           {n.undo && (
-            <button className="underline" onClick={async () => { await n.undo!(); setN(null); }}>
+            <button className="underline" onClick={async () => {
+              const current = n;
+              try { await current.undo!(); } finally { setN((cur) => (cur === current ? null : cur)); }
+            }}>
               撤销
             </button>
           )}
