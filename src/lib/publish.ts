@@ -153,3 +153,12 @@ export function badgeHint(a: {
       return undefined;
   }
 }
+
+export type CopyMode = 'both' | 'title' | 'body';
+
+export function formatForCopy(markdown: string, seq: number, fallbackTitle: string, mode: CopyMode = 'both'): string {
+  const { title, body } = buildPublishForm(markdown, seq, fallbackTitle);
+  if (mode === 'title') return title;
+  if (mode === 'body') return body;
+  return body ? `${title}\n\n${body}` : title;
+}

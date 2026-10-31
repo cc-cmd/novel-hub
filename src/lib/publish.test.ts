@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { badgeHint, buildPublishForm, countWords, deriveBadge, isStale, parseChineseNumber, parseH1, platformTitle, resolveTitle, toPublishBody } from './publish';
+import { badgeHint, buildPublishForm, countWords, deriveBadge, formatForCopy, isStale, parseChineseNumber, parseH1, platformTitle, resolveTitle, toPublishBody } from './publish';
 
 describe('parseChineseNumber', () => {
   it.each([['7', 7], ['十二', 12], ['二十', 20], ['一百零三', 103], ['两百', 200], ['十', 10]])('%s → %s', (s, n) => {
@@ -117,5 +117,30 @@ describe('badgeHint', () => {
   it('其他徽标无提示（丢失除外）', () => {
     expect(badgeHint({ badge: 'published', status: 'published', platformName: '番茄' })).toBeUndefined();
     expect(badgeHint({ badge: 'missing', status: 'published', platformName: '番茄' })).toBe('文件丢失');
+  });
+});
+
+describe('formatForCopy', () => {
+  const md = '# 第1章 开端\n\n## 小节\n**加粗**和*斜体*\n\n\n\n\n后文 [链接](http://x) ![图](a.png)\n';
+  it('AC5.1/5.4/5.5 标题 + 空行 + 去标记正文，标题不重复，多空行压缩', () => {
+    expect(formatForCopy(md, 1, '后备')).toBe('第1章 开端\n\n小节\n加粗和斜体\n\n后文 链接');
+  });
+  it('仅标题 / 仅正文', () => {
+    expect(formatForCopy(md, 1, '后备', 'title')).toBe('第1章 开端');
+    expect(formatForCopy(md, 1, '后备', 'body')).toBe('小节\n加粗和斜体\n\n后文 链接');
+  });
+  it('无 H1 时用后备标题；序号取自文件名而非 H1', () => {
+    expect(formatForCopy('正文', 7, '文件名标题')).toBe('第7章 文件名标题\n\n正文');
+    expect(formatForCopy('# 第9章 错号\n正文', 2, '后备')).toBe('第2章 错号\n\n正文');
+  });
+  it('正文为空时只输出标题（无多余空行）', () => {
+    expect(formatForCopy('# 第1章 开端\n', 1, '后备')).toBe('第1章 开端');
+  });
+  it('真实稿件 H1 格式', () => {
+    expect(formatForCopy('# 《陈波宁传》· 第1章 · 私信\n\n他推开门。', 1, 'x')).toBe('第1章 私信\n\n他推开门。');
+  });
+  it('幂等性：对「仅正文」结果再次转换不变', () => {
+    const body = formatForCopy(md, 1, '后备', 'body');
+    expect(toPublishBody(body)).toBe(body);
   });
 });
