@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react';
 import type { Filter, MatrixRow } from '@/lib/matrix';
 import type { Badge as BadgeKind, PublishStatus } from '@/lib/types';
 import { Badge } from './badge';
+import { CopyMenu } from './copy-menu';
 import { PublicationActions } from './publication-actions';
 
 const BADGE_OF: Record<PublishStatus, BadgeKind> = { unpublished: 'unpublished', pending_review: 'pending_review', published: 'published' };
@@ -69,7 +70,7 @@ export function MatrixTable({
                   })}
                   <td className="p-2">
                     <div className="flex gap-2">
-                      {/* REQ-05: <CopyMenu .../> 加在这里 */}
+                      <CopyMenu chapterId={ch.id} fileMissing={ch.fileMissing} />
                       {!ch.fileMissing && (
                         <Link className="inline-flex min-h-[44px] items-center rounded border px-3" href={`/novels/${novelId}/chapters/${ch.id}`}>编辑</Link>
                       )}
