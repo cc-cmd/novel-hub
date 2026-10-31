@@ -6,6 +6,7 @@ import { loadChapterForEdit } from '@/lib/chapters';
 import { platformTitle } from '@/lib/publish';
 import { syncChapter } from '@/lib/sync';
 import { ChapterEditor } from '@/components/chapter-editor';
+import { PlatformCards } from '@/components/platform-cards';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,7 @@ export default async function ChapterPage({ params }: { params: Promise<{ id: st
       initialBaseHash={data.baseHash}
       fileMissing={data.chapter.fileMissing}
       readError={data.readError}
-      aside={null /* REQ-03 在此传入 <PlatformCards /> */}
+      aside={<PlatformCards chapterId={data.chapter.id} seq={data.chapter.seq} fileMissing={data.chapter.fileMissing} />}
     />
   );
 }
