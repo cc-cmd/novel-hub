@@ -1,5 +1,7 @@
 // 唯一的「发布形态」转换实现。字数、hash、复制、需更新判断都依赖这里；不得在别处复制规则。
 
+import type { Badge, PublishStatus } from './types';
+
 export function parseChineseNumber(s: string): number | null {
   if (/^\d+$/.test(s)) return parseInt(s, 10);
   const digits: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
@@ -101,4 +103,53 @@ export function buildPublishForm(markdown: string, seq: number, fallbackTitle: s
 
 export function countWords(body: string): number {
   return [...body.replace(/\s/g, '')].length;
+}
+
+export interface ChapterForBadge {
+  contentHash: string | null;
+  fileMissing: boolean;
+}
+export interface PublicationForBadge {
+  status: PublishStatus;
+  publishedHash: string | null;
+}
+
+export const OVERWRITE_WARNING = '覆盖会重新审核，请确认已定稿。';
+
+/** 需更新 := status ∈ {pending_review, published} 且 published_hash ≠ content_hash。看板 SQL 必须与此等价。 */
+export function isStale(ch: ChapterForBadge, pub?: PublicationForBadge | null): boolean {
+  if (ch.fileMissing || !pub || pub.status === 'unpublished') return false;
+  if (!ch.contentHash) return false;
+  return !pub.publishedHash || pub.publishedHash !== ch.contentHash;
+}
+
+export function deriveBadge(ch: ChapterForBadge, pub?: PublicationForBadge | null): Badge {
+  if (ch.fileMissing) return 'missing';
+  if (!pub || pub.status === 'unpublished') return 'unpublished';
+  return isStale(ch, pub) ? 'stale' : pub.status;
+}
+
+function fmtDate(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function badgeHint(a: {
+  badge: Badge;
+  status: PublishStatus;
+  platformName: string;
+  mtimeMs?: number | null;
+}): string | undefined {
+  switch (a.badge) {
+    case 'pending_review':
+      return `平台审核中，暂不能修改该章${a.platformName === '番茄' ? '（番茄审核时段 7:00–24:00）' : ''}`;
+    case 'stale':
+      if (a.status === 'pending_review') return '本地内容已变更，待审核结束后再覆盖';
+      return `本地内容已${a.mtimeMs ? `于 ${fmtDate(a.mtimeMs)} ` : ''}变更，与 ${a.platformName} 已发版本不一致`;
+    case 'missing':
+      return '文件丢失';
+    default:
+      return undefined;
+  }
 }
