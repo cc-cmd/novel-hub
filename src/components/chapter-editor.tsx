@@ -4,7 +4,9 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, useTransition } from 'react';
 import { saveChapterAction } from '@/app/actions/chapters';
 import { CONFLICT_MESSAGE } from '@/lib/chapters-constants';
-import { countWords, toPublishBody } from '@/lib/publish';
+import { copyAsync } from '@/lib/clipboard';
+import { copyNotice } from '@/lib/copy-notice';
+import { buildPublishForm, countWords, formatForCopy, toPublishBody } from '@/lib/publish';
 
 interface Props {
   novelId: number;
@@ -16,6 +18,8 @@ interface Props {
   initialBaseHash: string | null;
   fileMissing: boolean;
   readError: string | null;
+  seq: number;
+  fallbackTitle: string;
   aside?: React.ReactNode;
 }
 
@@ -30,6 +34,8 @@ export function ChapterEditor(p: Props) {
   const [pending, start] = useTransition();
   const [reloading, setReloading] = useState(false);
   const [refreshing, startRefresh] = useTransition();
+  const [copyMsg, setCopyMsg] = useState('');
+  const [copyFallback, setCopyFallback] = useState<string | null>(null);
 
   const disabled = p.fileMissing || !!p.readError;
   const dirty = content !== saved;
@@ -51,12 +57,28 @@ export function ChapterEditor(p: Props) {
     setConflict(false);
     setError('');
     setJustSaved(false);
+    setCopyMsg('');
+    setCopyFallback(null);
     setReloading(false);
   }, [reloading, refreshing, p.initialContent, p.initialBaseHash]);
 
   const reload = () => {
     setReloading(true);
     startRefresh(() => router.refresh());
+  };
+
+  const copy = async () => {
+    setCopyFallback(null);
+    const text = formatForCopy(content, p.seq, p.fallbackTitle);
+    const r = await copyAsync(async () => text);
+    if (!r.ok) {
+      setCopyFallback(r.text);
+      return setCopyMsg('无法写入剪贴板，请手动全选复制');
+    }
+    const form = buildPublishForm(content, p.seq, p.fallbackTitle);
+    setCopyMsg(
+      copyNotice({ title: form.title, wordCount: words, bodyEmpty: form.body === '', mode: 'both' }, dirty),
+    );
   };
 
   const save = (overwrite = false) =>
@@ -73,6 +95,8 @@ export function ChapterEditor(p: Props) {
       setSaved(content);
       setBaseHash(r.data.baseHash);
       setJustSaved(true);
+      setCopyMsg('');
+      setCopyFallback(null);
       router.refresh(); // 刷新右侧平台状态卡（可能变为「需更新」）
     });
 
@@ -84,7 +108,7 @@ export function ChapterEditor(p: Props) {
           <h1 className="font-serif text-xl">{p.heading}</h1>
           <div className="font-mono text-xs text-stone-500">{p.filePath}</div>
         </div>
-        {/* REQ-05 在此加入「复制标题+正文」按钮 */}
+        <button className="rounded border px-4 disabled:opacity-40" disabled={disabled} onClick={copy}>复制标题+正文</button>
         <button
           className="rounded bg-stone-900 px-4 text-white disabled:opacity-40"
           disabled={disabled || !dirty || pending}
@@ -116,12 +140,15 @@ export function ChapterEditor(p: Props) {
             className="min-h-[60vh] w-full resize-y rounded border bg-white p-4 font-serif leading-8 disabled:bg-stone-100"
             value={content}
             disabled={disabled}
-            onChange={(e) => { setContent(e.target.value); setJustSaved(false); }}
+            onChange={(e) => { setContent(e.target.value); setJustSaved(false); setCopyMsg(''); setCopyFallback(null); }}
           />
           <div className="flex justify-between font-mono text-xs text-stone-600">
             <span>{words} 字</span>
-            <span>{dirty ? '未保存修改' : justSaved ? '已写回文件，字数与状态已更新' : '与文件一致'}</span>
+            <span>{copyMsg || (dirty ? '未保存修改' : justSaved ? '已写回文件，字数与状态已更新' : '与文件一致')}</span>
           </div>
+          {copyFallback !== null && (
+            <textarea readOnly className="mt-2 h-32 w-full rounded border p-2 text-xs" value={copyFallback} onFocus={(e) => e.currentTarget.select()} />
+          )}
         </div>
         <aside className="space-y-3">{p.aside}</aside>
       </div>
