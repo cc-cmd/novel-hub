@@ -12,6 +12,7 @@ import { RescanNovelButton } from '@/components/rescan-novel-button';
 import { listChapters, listProblems } from '@/lib/chapters';
 import { getMatrix, parseFilter } from '@/lib/matrix';
 import { listBindings } from '@/lib/platforms';
+import { parsePositiveInt } from '@/lib/parse-id';
 import { syncNovel } from '@/lib/sync';
 
 export const dynamic = 'force-dynamic';
@@ -26,12 +27,14 @@ export default async function NovelPage({
   const { id } = await params;
   const sp = await searchParams;
   const db = getDb();
-  const n = db.select().from(novel).where(eq(novel.id, Number(id))).get();
+  const novelId = parsePositiveInt(id);
+  if (novelId === null) notFound();
+  const n = db.select().from(novel).where(eq(novel.id, novelId)).get();
   if (!n) notFound();
 
   const sync = syncNovel(db, n.id); // F2.8：打开页面时同步
   const filter = parseFilter(sp.filter);
-  const platformId = sp.platform ? Number(sp.platform) : null;
+  const platformId = parsePositiveInt(sp.platform);
   const matrix = getMatrix(db, n.id, { filter, platformId });
   const bindings = listBindings(db, n.id);
   const problems = listProblems(db, n.id);

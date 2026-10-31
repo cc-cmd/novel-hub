@@ -44,7 +44,13 @@ export function PublicationActions(p: Props) {
   const run = (action: PubAction) =>
     start(async () => {
       p.onOptimistic?.(EXPECTED[action]);
-      const r = await publicationAction(p.chapterId, p.platformId, action);
+      let r;
+      try {
+        r = await publicationAction(p.chapterId, p.platformId, action);
+      } catch {
+        p.onOptimistic?.(null);
+        return notify({ kind: 'error', text: '操作失败，请重试' });
+      }
       if (!r.ok) {
         p.onOptimistic?.(null);
         return notify({ kind: 'error', text: r.error });
@@ -55,8 +61,12 @@ export function PublicationActions(p: Props) {
         notify({
           kind: 'success', text,
           undo: async () => {
-            const u = await restorePublicationAction(p.chapterId, p.platformId, before);
-            if (!u.ok) notify({ kind: 'error', text: u.error });
+            try {
+              const u = await restorePublicationAction(p.chapterId, p.platformId, before);
+              if (!u.ok) notify({ kind: 'error', text: u.error });
+            } catch {
+              notify({ kind: 'error', text: '撤销失败，请重试' });
+            }
             router.refresh();
           },
         });

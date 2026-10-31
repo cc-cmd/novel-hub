@@ -1,9 +1,10 @@
 import { notFound } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { novel } from '@/db/schema';
+import { chapter, novel } from '@/db/schema';
 import { loadChapterForEdit } from '@/lib/chapters';
 import { platformTitle } from '@/lib/publish';
+import { UserError } from '@/lib/result';
 import { syncChapter } from '@/lib/sync';
 import { ChapterEditor } from '@/components/chapter-editor';
 import { PlatformCards } from '@/components/platform-cards';
@@ -17,10 +18,14 @@ export default async function ChapterPage({ params }: { params: Promise<{ id: st
   const chapterId = Number(cid);
   if (!Number.isInteger(novelId) || !Number.isInteger(chapterId)) notFound();
 
+  const existing = db.select().from(chapter).where(eq(chapter.id, chapterId)).get();
+  if (!existing || existing.novelId !== novelId) notFound();
+
   try {
     syncChapter(db, chapterId); // F2.8：打开时保证库与磁盘一致
-  } catch {
-    notFound();
+  } catch (e) {
+    if (e instanceof UserError) notFound();
+    throw e;
   }
   const data = loadChapterForEdit(db, chapterId);
   const n = db.select().from(novel).where(eq(novel.id, novelId)).get();

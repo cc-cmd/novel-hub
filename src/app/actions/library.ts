@@ -45,18 +45,24 @@ export async function rescanNovelAction(novelId: number) {
 export async function setArchivedAction(novelId: number, archived: boolean) {
   return wrap(() => {
     const db = getDb();
-    const n = setArchived(db, novelId, archived);
-    if (!archived) syncNovel(db, novelId);
-    refresh();
-    return { name: n.name };
+    try {
+      const n = setArchived(db, novelId, archived);
+      if (!archived) syncNovel(db, novelId);
+      return { name: n.name };
+    } finally {
+      refresh();
+    }
   });
 }
 
 export async function setChapterSubdirAction(novelId: number, subdir: string) {
   return wrap(() => {
     const db = getDb();
-    setChapterSubdir(db, novelId, subdir);
-    syncNovel(db, novelId, { force: true });
-    refresh();
+    try {
+      setChapterSubdir(db, novelId, subdir);
+      syncNovel(db, novelId, { force: true });
+    } finally {
+      refresh();
+    }
   });
 }

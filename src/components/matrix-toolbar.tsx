@@ -32,7 +32,7 @@ export function MatrixToolbar(p: {
           </button>
         ))}
       </div>
-      <select className="rounded border px-2 text-sm" value={p.platformId ?? ''} aria-label="限定平台"
+      <select className="rounded border px-2 text-sm" value={p.platformId !== null && p.platforms.some((x) => x.id === p.platformId) ? p.platformId : ''} aria-label="限定平台"
         onChange={(e) => go(p.filter, e.target.value ? Number(e.target.value) : null)}>
         <option value="">全部平台</option>
         {p.platforms.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
