@@ -1,3 +1,4 @@
+import { CopyFormatSection } from './copy-format-section';
 import { PlatformsSection } from './platforms-section';
 import { RootsSection } from './roots-section';
 
@@ -9,7 +10,7 @@ export default function SettingsPage() {
       <h1 className="font-serif text-2xl">设置</h1>
       <RootsSection />
       <PlatformsSection />
-      {/* REQ-05 在此追加 <CopyFormatSection /> */}
+      <CopyFormatSection />
     </div>
   );
 }
