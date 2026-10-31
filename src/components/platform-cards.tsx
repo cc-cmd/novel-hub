@@ -8,7 +8,7 @@ export function PlatformCards({ chapterId, seq, fileMissing }: { chapterId: numb
   return (
     <>
       {cells.map((c) => (
-        <PlatformCard key={c.platformId} cell={c} chapterId={chapterId} chapterLabel={`第${seq}章`} fileMissing={fileMissing} />
+        <PlatformCard key={`${c.platformId}:${c.status}:${c.publishedAt}:${c.platformUrl}`} cell={c} chapterId={chapterId} chapterLabel={`第${seq}章`} fileMissing={fileMissing} />
       ))}
     </>
   );

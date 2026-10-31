@@ -3,6 +3,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { updatePublicationInfoAction } from '@/app/actions/publications';
 import type { MatrixCell } from '@/lib/matrix';
+import { buildInfoPatch } from '@/lib/publication-patch';
 import { Badge } from './badge';
 import { useNotice } from './notice';
 import { PublicationActions } from './publication-actions';
@@ -20,13 +21,13 @@ export function PlatformCard({ cell, chapterId, chapterLabel, fileMissing }: {
   const { notify } = useNotice();
   const [url, setUrl] = useState(cell.platformUrl ?? '');
   const [at, setAt] = useState(toLocalInput(cell.publishedAt));
+  const [atDirty, setAtDirty] = useState(false);
   const [error, setError] = useState('');
   const [pending, start] = useTransition();
 
   const save = () =>
     start(async () => {
-      const patch: { platformUrl: string | null; publishedAt?: number | null } = { platformUrl: url || null };
-      if (cell.status !== 'unpublished') patch.publishedAt = at ? new Date(at).getTime() : null;
+      const patch = buildInfoPatch({ status: cell.status, url, at, atDirty });
       const r = await updatePublicationInfoAction(chapterId, cell.platformId, patch);
       if (!r.ok) return setError(r.error);
       notify({ kind: 'success', text: `已保存 ${cell.platformName} 发布信息` });
@@ -47,7 +48,7 @@ export function PlatformCard({ cell, chapterId, chapterLabel, fileMissing }: {
       <div className="space-y-2 text-sm">
         {cell.status !== 'unpublished' && (
           <label className="block">发布时间
-            <input type="datetime-local" className="mt-1 w-full rounded border px-2" value={at} onChange={(e) => setAt(e.target.value)} />
+            <input type="datetime-local" className="mt-1 w-full rounded border px-2" value={at} onChange={(e) => { setAt(e.target.value); setAtDirty(true); }} />
           </label>
         )}
         <label className="block">章节链接
