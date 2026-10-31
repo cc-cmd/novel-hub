@@ -18,6 +18,7 @@ describe('parseH1', () => {
     expect(parseH1('# 《陈波宁传》· 第1章 · 私信\n\n正文')).toEqual({ chapterNo: 1, title: '私信' });
     expect(parseH1('# 《书》・第二章・标题')).toEqual({ chapterNo: 2, title: '标题' });
   });
+  it('忽略 BOM', () => expect(parseH1('\uFEFF# 第1章 x')).toEqual({ chapterNo: 1, title: 'x' }));
   it('无法解析 → null', () => {
     expect(parseH1('正文')).toBeNull();
     expect(parseH1('# 序章')).toBeNull();
@@ -51,6 +52,7 @@ describe('toPublishBody', () => {
     expect(toPublishBody(once)).toBe(once);
   });
   it('空文件', () => expect(toPublishBody('')).toBe(''));
+  it('忽略 BOM', () => expect(toPublishBody('\uFEFF# 第1章 x\n正文')).toBe('正文'));
 });
 
 describe('title / form / words', () => {

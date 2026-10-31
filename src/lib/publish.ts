@@ -32,7 +32,7 @@ const H1_RE = /^#\s+(?:《[^》]+》\s*[·・]\s*)?第\s*([0-9]+|[零〇一二�
 
 export function parseH1(markdown: string): H1Info | null {
   const first = markdown
-    .replace(/^﻿/, '')
+    .replace(/^\uFEFF/, '')
     .split(/\r\n|\r|\n/)
     .find((l) => l.trim() !== '');
   if (!first) return null;
@@ -70,11 +70,11 @@ function convertLine(line: string): string {
     .replace(/__(?=\S)(.+?)(?<=\S)__/g, '$1')
     .replace(/(?<!\*)\*(?=[^\s*])([^*\n]*?[^\s*])\*(?!\*)/g, '$1')
     .replace(/(?<!\w)_(?=[^\s_])([^_\n]*?[^\s_])_(?!\w)/g, '$1');
-  return s.replace(/[-]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - ESC_BASE));
+  return s.replace(/[\uE000-\uE07F]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - ESC_BASE));
 }
 
 export function toPublishBody(markdown: string): string {
-  let text = markdown.replace(/^﻿/, '').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '');
+  let text = markdown.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '');
   text = stripLeadingH1(text);
   const out: string[] = [];
   let inFence = false;
