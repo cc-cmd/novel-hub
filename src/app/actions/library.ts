@@ -2,7 +2,8 @@
 import { revalidatePath } from 'next/cache';
 import { getDb } from '@/db';
 import { wrap } from '@/lib/result';
-import { addRoot, removeRoot, scanLibrary, setArchived, setChapterSubdir } from '@/lib/library';
+import { addRoot, removeRoot, setArchived, setChapterSubdir } from '@/lib/library';
+import { scanAndSync, syncNovel } from '@/lib/sync';
 
 function refresh() {
   revalidatePath('/');
@@ -27,15 +28,25 @@ export async function removeRootAction(id: number) {
 
 export async function rescanAction() {
   return wrap(() => {
-    const s = scanLibrary(getDb());
+    const s = scanAndSync(getDb());
     refresh();
     return s;
   });
 }
 
+export async function rescanNovelAction(novelId: number) {
+  return wrap(() => {
+    const r = syncNovel(getDb(), novelId, { force: true });
+    refresh();
+    return r;
+  });
+}
+
 export async function setArchivedAction(novelId: number, archived: boolean) {
   return wrap(() => {
-    const n = setArchived(getDb(), novelId, archived);
+    const db = getDb();
+    const n = setArchived(db, novelId, archived);
+    if (!archived) syncNovel(db, novelId);
     refresh();
     return { name: n.name };
   });
@@ -43,7 +54,9 @@ export async function setArchivedAction(novelId: number, archived: boolean) {
 
 export async function setChapterSubdirAction(novelId: number, subdir: string) {
   return wrap(() => {
-    setChapterSubdir(getDb(), novelId, subdir);
+    const db = getDb();
+    setChapterSubdir(db, novelId, subdir);
+    syncNovel(db, novelId, { force: true });
     refresh();
   });
 }
