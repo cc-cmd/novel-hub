@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { @apply bg-stone-50 text-stone-900 font-sans; }
+button, input, select { @apply min-h-[44px]; }
+/* 行内链接不强制 44px；独立成块的链接/按钮请显式加 `inline-flex min-h-[44px] items-center` */
