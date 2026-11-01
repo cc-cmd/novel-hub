@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { chapter } from '@/db/schema';
 import { insertNovel, makeDb, makeTmpDir } from '@/test/helpers';
 import { CONFLICT_MESSAGE, listChapters, listProblems, loadChapterForEdit, saveChapter } from './chapters';
+import { UserError } from './result';
 import { syncNovel } from './sync';
 
 const cleanups: Array<() => void> = [];
@@ -77,6 +78,14 @@ describe('loadChapterForEdit / saveChapter', () => {
     const e = loadChapterForEdit(db, ch()[0].id);
     expect([e.content, e.baseHash]).toEqual(['', null]);
     expect(() => saveChapter(db, e.chapter.id, 'x', { baseHash: 'x' })).toThrow('文件丢失，无法编辑');
+  });
+
+  it('F2.15 磁盘文件在保存前被删除/不可读：抛 UserError 而非裸异常', () => {
+    const { db, dir, ch } = setup({ 'Ch01-开端.md': '# 第1章 开端\n\nx\n' });
+    const e = loadChapterForEdit(db, ch()[0].id);
+    fs.rmSync(path.join(dir, 'Ch01-开端.md')); // 库里还没标记 file_missing
+    expect(() => saveChapter(db, e.chapter.id, 'x', { baseHash: e.baseHash! })).toThrow(UserError);
+    expect(() => saveChapter(db, e.chapter.id, 'x', { baseHash: e.baseHash! })).toThrow('无法读取文件');
   });
 
   it('保存后返回的 baseHash 可用于连续保存', () => {

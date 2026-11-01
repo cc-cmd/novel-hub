@@ -68,7 +68,12 @@ export function saveChapter(
   const ch = getChapter(db, chapterId);
   if (ch.fileMissing) throw new UserError('文件丢失，无法编辑');
 
-  const current = readChapterFile(ch.filePath);
+  let current: ReturnType<typeof readChapterFile>;
+  try {
+    current = readChapterFile(ch.filePath);
+  } catch (e) {
+    throw new UserError(`无法读取文件：${(e as Error).message}`);
+  }
   if (!current.ok) throw new UserError('编码不支持：文件不是 UTF-8，无法保存');
   if (!opts.overwrite && current.rawHash !== opts.baseHash) throw new UserError(CONFLICT_MESSAGE);
 
@@ -78,8 +83,12 @@ export function saveChapter(
   } catch (e) {
     throw new UserError(`保存失败，文件未被修改：${(e as Error).message}`);
   }
-  syncChapter(db, chapterId);
-
-  const after = readChapterFile(ch.filePath);
-  return { wordCount: getChapter(db, chapterId).wordCount, baseHash: after.ok ? after.rawHash : '' };
+  // 文件已写成功；之后任何失败都不能让调用方以为没保存
+  try {
+    syncChapter(db, chapterId);
+    const after = readChapterFile(ch.filePath);
+    return { wordCount: getChapter(db, chapterId).wordCount, baseHash: after.ok ? after.rawHash : '' };
+  } catch (e) {
+    throw new UserError(`文件已保存，但同步失败，请重新扫描：${(e as Error).message}`);
+  }
 }

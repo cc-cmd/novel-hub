@@ -67,7 +67,11 @@ function write(db: Db, chapterId: number, platformId: number, s: PubSnapshot) {
     .run();
 }
 
+const ACTIONS: readonly string[] = ['mark_pending', 'mark_published', 'approve', 'resubmit', 'cancel'];
+const STATUSES: readonly string[] = ['unpublished', 'pending_review', 'published'];
+
 export function applyPublicationAction(db: Db, chapterId: number, platformId: number, action: PubAction, now = Date.now()) {
+  if (!ACTIONS.includes(action)) throw new UserError('未知的发布操作');
   let ch = getChapter(db, chapterId);
   const bound = db
     .select()
@@ -86,6 +90,14 @@ export function applyPublicationAction(db: Db, chapterId: number, platformId: nu
 }
 
 export function restorePublication(db: Db, chapterId: number, platformId: number, snapshot: PubSnapshot): void {
+  // 快照来自客户端，入库前重新校验
+  const s = snapshot as Partial<PubSnapshot> | null;
+  const intOrNull = (v: unknown) => v === null || (typeof v === 'number' && Number.isFinite(v));
+  if (
+    !s || !STATUSES.includes(s.status as string) || !intOrNull(s.publishedAt) ||
+    !(s.publishedHash === null || typeof s.publishedHash === 'string')
+  ) throw new UserError('撤销数据无效');
+  snapshot = { ...snapshot, platformUrl: validateUrl(s.platformUrl, '章节链接') };
   write(db, chapterId, platformId, snapshot);
 }
 

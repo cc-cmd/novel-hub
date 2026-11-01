@@ -118,3 +118,16 @@ describe('updatePublicationInfo', () => {
     expect(updatePublicationInfo(s.db, s.ch.id, s.fanqie.id, { publishedAt: 9 }).publishedAt).toBe(9);
   });
 });
+
+describe('客户端入参校验', () => {
+  it('未知 action 抛 UserError 而非 TypeError', () => {
+    const s = setup();
+    expect(() => applyPublicationAction(s.db, s.ch.id, s.fanqie.id, 'bogus' as never)).toThrow('未知的发布操作');
+  });
+  it('restore 拒绝非法快照（status 非法、javascript: 链接）', () => {
+    const s = setup();
+    expect(() => restorePublication(s.db, s.ch.id, s.fanqie.id, { ...E, status: 'x' as never })).toThrow('撤销数据无效');
+    expect(() => restorePublication(s.db, s.ch.id, s.fanqie.id, { ...E, platformUrl: 'javascript:alert(1)' })).toThrow('章节链接格式错误');
+    expect(s.row()).toBeUndefined();
+  });
+});

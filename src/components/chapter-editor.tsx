@@ -85,7 +85,13 @@ export function ChapterEditor(p: Props) {
     start(async () => {
       if (!baseHash) return;
       setError('');
-      const r = await saveChapterAction(p.chapterId, content, baseHash, overwrite);
+      let r: Awaited<ReturnType<typeof saveChapterAction>>;
+      try {
+        r = await saveChapterAction(p.chapterId, content, baseHash, overwrite);
+      } catch (e) {
+        setError(`保存失败，编辑内容已保留：${(e as Error).message}`);
+        return;
+      }
       if (!r.ok) {
         if (r.error === CONFLICT_MESSAGE) setConflict(true);
         else setError(r.error);
