@@ -53,7 +53,9 @@ export function createFanqieClient(auth: { cookie: string; csrfToken: string }, 
     let json: unknown;
     try {
       json = await res.json();
-    } catch {
+    } catch (e) {
+      const name = e instanceof Error ? e.name : '';
+      if (name === 'TimeoutError' || name === 'AbortError') throw new PlatformUnavailableError();
       throw new PlatformFormatError();
     }
     if (!isObj(json) || typeof json.code !== 'number') throw new PlatformFormatError();
@@ -69,10 +71,10 @@ export function createFanqieClient(auth: { cookie: string; csrfToken: string }, 
     return v.filter(isObj);
   };
 
-  /** 分页取全：以「本页没有新条目」或「不足一页」为终止，不依赖 page_index 是 0 起还是 1 起。 */
+  /** 分页取全：仅以「本页没有新条目」为终止（番茄可能把 page_count 压到小于请求值，不能按「不足一页」判断），
+   *  不依赖 page_index 是 0 起还是 1 起。到达 MAX_PAGES 仍未终止则报错，绝不返回被截断的列表。 */
   async function paged<T extends { key: string }>(
     fetchPage: (page: number) => Promise<T[]>,
-    pageSize: number,
   ): Promise<T[]> {
     const seen = new Set<string>();
     const out: T[] = [];
@@ -81,9 +83,9 @@ export function createFanqieClient(auth: { cookie: string; csrfToken: string }, 
       const fresh = rows.filter((r) => r.key && !seen.has(r.key));
       fresh.forEach((r) => seen.add(r.key));
       out.push(...fresh);
-      if (fresh.length === 0 || rows.length < pageSize) break;
+      if (fresh.length === 0) return out;
     }
-    return out;
+    throw new PlatformFormatError();
   }
 
   return {
@@ -91,7 +93,7 @@ export function createFanqieClient(auth: { cookie: string; csrfToken: string }, 
       const rows = await paged(async (page) => {
         const { data } = await call('/api/author/book/book_list/v0', { page_index: page, page_count: BOOK_PAGE });
         return arrayAt(data, 'book_list').map((b) => ({ key: String(b.book_id ?? '') }));
-      }, BOOK_PAGE);
+      });
       return rows.map((r) => r.key);
     },
 
@@ -113,7 +115,7 @@ export function createFanqieClient(auth: { cookie: string; csrfToken: string }, 
               displayStatus: Number(c.display_status) || 0,
             } satisfies RemoteChapter,
           }));
-        }, CHAPTER_PAGE);
+        });
         out.push(...rows.map((r) => r.chapter));
       }
       return out;

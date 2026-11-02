@@ -42,6 +42,46 @@ describe('listBookIds', () => {
   });
 });
 
+describe('分页完整性', () => {
+  const item = (id: string) => ({ item_id: id, title: id, word_number: 1, display_status: 1 });
+
+  it('服务端把每页上限压到 100（小于请求的 200）时仍取全 250 章', async () => {
+    const all = Array.from({ length: 250 }, (_, i) => item(`i${i}`));
+    const { f } = fakeFetch({
+      '/api/author/volume/volume_list/v1': () => ok({ volume_list: [{ volume_id: 'v1' }] }),
+      '/api/author/chapter/chapter_list/v1': (u) => {
+        const p = Number(u.searchParams.get('page_index'));
+        return ok({ item_list: all.slice(p * 100, p * 100 + 100) });
+      },
+    });
+    expect(await createFanqieClient(AUTH, f).listChapters('B')).toHaveLength(250);
+  });
+
+  it('永远有新条目（到达页数上限）→ PlatformFormatError，而不是返回截断列表', async () => {
+    const { f } = fakeFetch({
+      '/api/author/book/book_list/v0': (u) => ok({ book_list: [{ book_id: `p${u.searchParams.get('page_index')}` }] }),
+    });
+    await expect(createFanqieClient(AUTH, f).listBookIds()).rejects.toBeInstanceOf(PlatformFormatError);
+  });
+});
+
+describe('读取响应体', () => {
+  const withJson = (json: () => Promise<unknown>) =>
+    (async () => ({ ok: true, status: 200, json }) as unknown as Response) as unknown as typeof fetch;
+
+  it('读 body 时超时/中止 → PlatformUnavailableError', async () => {
+    for (const name of ['TimeoutError', 'AbortError']) {
+      const f = withJson(async () => { throw new DOMException('x', name); });
+      await expect(createFanqieClient(AUTH, f).listBookIds()).rejects.toBeInstanceOf(PlatformUnavailableError);
+    }
+  });
+
+  it('JSON 解析失败 → PlatformFormatError', async () => {
+    const f = withJson(async () => JSON.parse('<html>'));
+    await expect(createFanqieClient(AUTH, f).listBookIds()).rejects.toBeInstanceOf(PlatformFormatError);
+  });
+});
+
 describe('错误分类', () => {
   const run = (resp: () => Response) =>
     createFanqieClient(AUTH, fakeFetch({ '/api/author/book/book_list/v0': resp }).f).listBookIds();
