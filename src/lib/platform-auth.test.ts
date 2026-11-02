@@ -33,6 +33,13 @@ describe('saveFanqieAuth', () => {
     await saveFanqieAuth(s.db, s.fanqie.id, { cookie: ' c ', csrfToken: ' t ' }, () => client(['1']));
     expect(row(s.db, s.fanqie.id)).toMatchObject({ cookie: 'c', csrfToken: 't' });
   });
+  it('F7.29 保存成功后清除该平台下所有小说的 last_sync_error', async () => {
+    const s = setup();
+    const n2 = insertNovel(s.db, '/x/B');
+    for (const id of [s.n.id, n2.id]) s.db.insert(novelPlatform).values({ novelId: id, platformId: s.fanqie.id, lastSyncError: 'x' }).run();
+    await saveFanqieAuth(s.db, s.fanqie.id, { cookie: 'c', csrfToken: 't' }, () => client(['1']));
+    expect(s.db.select().from(novelPlatform).all().map((r) => r.lastSyncError)).toEqual([null, null]);
+  });
   it('空值、含换行（头注入）、非番茄平台均拒绝', async () => {
     const s = setup();
     const ok = () => client(['1']);

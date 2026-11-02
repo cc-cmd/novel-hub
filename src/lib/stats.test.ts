@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { chapter, libraryRoot, novel, platform, publication } from '@/db/schema';
+import { chapter, libraryRoot, novel, novelPlatform, platform, publication } from '@/db/schema';
 import { configureFanqie, insertNovel, makeDb } from '@/test/helpers';
-import { bindPlatform, listPlatforms } from './platforms';
+import { bindPlatform, isSyncConfigured, listPlatforms } from './platforms';
 import { getDashboard, parseSort } from './stats';
 import { setArchived } from './library';
 
@@ -71,6 +71,29 @@ describe('getDashboard 统计口径', () => {
     s.pub(c.id, s.qidian.id, 'published'); // 起点未绑定
     expect(stat(s.db, 'A').platforms.map((p) => p.platformName)).toEqual(['番茄']);
   });
+
+  it.each([
+    ['空串 cookie', { cookie: '' }],
+    ['空串 csrf_token', { csrfToken: '' }],
+    ['book_id 为 null', { bookId: null }],
+    ['book_id 为空串', { bookId: '' }],
+    ['非番茄平台但有凭据与 book_id', { target: 'qidian' }],
+    ['完整配置', {}],
+  ] as Array<[string, { cookie?: string; csrfToken?: string; bookId?: string | null; target?: 'qidian' }]>)(
+    'SQL 已配置口径与 isSyncConfigured 等价：%s', (_label, o) => {
+      const s = base();
+      const n = s.mkNovel('A');
+      const p = o.target === 'qidian' ? s.qidian : s.fanqie;
+      s.db.update(platform).set({ cookie: o.cookie ?? 'c', csrfToken: o.csrfToken ?? 't' }).where(eq(platform.id, p.id)).run();
+      bindPlatform(s.db, n.id, p.id, 'https://fanqienovel.com/main/writer/chapter-manage/7670888040847395864&x?type=1');
+      const link = s.db.select().from(novelPlatform).get()!;
+      const bookId = 'bookId' in o ? o.bookId! : link.bookId;
+      s.db.update(novelPlatform).set({ bookId }).where(eq(novelPlatform.novelId, n.id)).run();
+      const row = s.db.select().from(platform).where(eq(platform.id, p.id)).get()!;
+      const expected = isSyncConfigured({ name: row.name, cookie: row.cookie, csrfToken: row.csrfToken, bookId });
+      expect(stat(s.db, 'A').platforms[0].configured).toBe(expected);
+    },
+  );
 
   it('F6.8 归档默认隐藏，且排在末尾', () => {
     const s = base();

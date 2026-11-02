@@ -40,7 +40,8 @@ export function MatrixTable({
         </thead>
         <tbody>
           {rows.map(({ chapter: ch, cells }) => {
-            const openCell = cells.find((c) => open === `${ch.id}:${c.platformId}`);
+            const openCell = cells.find((c) => c.badge === 'stale' && open === `${ch.id}:${c.platformId}`);
+            const openBookUrl = openCell && platforms.find((p) => p.id === openCell.platformId)?.bookUrl;
             const changed = cells.some((c) => c.changedSinceSync);
             return (
               <Fragment key={ch.id}>
@@ -93,8 +94,8 @@ export function MatrixTable({
                         </span>
                         <span className="flex-1" />
                         <CopyMenu chapterId={ch.id} fileMissing={ch.fileMissing} label="复制标题+正文" />
-                        {platforms.find((p) => p.id === openCell.platformId)?.bookUrl && (
-                          <a className="underline" href={platforms.find((p) => p.id === openCell.platformId)!.bookUrl!} target="_blank" rel="noreferrer">打开{openCell.platformName}后台 ↗</a>
+                        {openBookUrl && (
+                          <a className="underline" href={openBookUrl} target="_blank" rel="noreferrer">打开{openCell.platformName}后台 ↗</a>
                         )}
                         <span className="basis-full text-xs">在{openCell.platformName}覆盖后点“重新扫描”，状态会自动更新。覆盖会重新审核，请确认已定稿。</span>
                       </div>

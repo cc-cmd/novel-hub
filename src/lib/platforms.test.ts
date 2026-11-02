@@ -118,3 +118,37 @@ describe('REQ-07 已配置判定与绑定', () => {
     expect(db.select().from(novelPlatform).get()).toMatchObject({ bookUrl: null, bookId: null });
   });
 });
+
+describe('bindPlatform 换绑作品', () => {
+  const urlOf = (id: string) => `https://fanqienovel.com/main/writer/chapter-manage/${id}&x?type=1`;
+
+  function seed() {
+    const db = makeDb();
+    const [fanqie] = listPlatforms(db);
+    const n = insertNovel(db, '/x/A');
+    bindPlatform(db, n.id, fanqie.id, urlOf('111'));
+    const c = db.insert(chapter).values({ novelId: n.id, seq: 1, title: 'T', filePath: '/x/1.md', wordCount: 1, contentHash: 'H' }).returning().get();
+    db.insert(publication).values({
+      chapterId: c.id, platformId: fanqie.id, status: 'published', publishedAt: 5, platformUrl: 'http://u',
+      publishedHash: 'H', platformItemId: 'i1', platformWordCount: 9, syncedAt: 7,
+    }).run();
+    const pub = () => db.select().from(publication).get()!;
+    return { db, fanqie, n, pub };
+  }
+
+  it('换绑到另一本书：旧书同步状态重置为未发布，记录保留', () => {
+    const s = seed();
+    bindPlatform(s.db, s.n.id, s.fanqie.id, urlOf('222'));
+    expect(s.pub()).toMatchObject({
+      status: 'unpublished', platformItemId: null, platformWordCount: null, syncedAt: null,
+      publishedAt: 5, platformUrl: 'http://u', publishedHash: 'H',
+    });
+  });
+
+  it('重复保存同一链接：记录不动', () => {
+    const s = seed();
+    const before = s.pub();
+    bindPlatform(s.db, s.n.id, s.fanqie.id, urlOf('111'));
+    expect(s.pub()).toEqual(before);
+  });
+});

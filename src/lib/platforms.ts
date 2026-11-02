@@ -1,4 +1,4 @@
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@/db';
 import { chapter, novelPlatform, platform, publication, type Platform } from '@/db/schema';
 import { parseFanqieBookId } from './fanqie-url';
@@ -81,13 +81,25 @@ export function bindPlatform(db: Db, novelId: number, platformId: number, bookUr
     .where(and(eq(novelPlatform.novelId, novelId), eq(novelPlatform.platformId, platformId))).get();
   // 只有换了作品才清空同步记录；重复保存同一链接不能抹掉已记录的「认证已失效」
   const switched = !!prev && prev.bookId !== bookId;
-  db.insert(novelPlatform)
-    .values({ novelId, platformId, bookUrl: url, bookId })
-    .onConflictDoUpdate({
-      target: [novelPlatform.novelId, novelPlatform.platformId],
-      set: { bookUrl: url, bookId, ...(switched ? { lastSyncedAt: null, lastSyncError: null } : {}) },
-    })
-    .run();
+  db.$client.transaction(() => {
+    db.insert(novelPlatform)
+      .values({ novelId, platformId, bookUrl: url, bookId })
+      .onConflictDoUpdate({
+        target: [novelPlatform.novelId, novelPlatform.platformId],
+        set: { bookUrl: url, bookId, ...(switched ? { lastSyncedAt: null, lastSyncError: null } : {}) },
+      })
+      .run();
+    // 换了作品：旧书的逐章同步状态不再成立，重置为未发布（只清同步字段，发布记录不删）
+    if (switched) {
+      db.update(publication)
+        .set({ status: 'unpublished', platformItemId: null, platformWordCount: null, syncedAt: null })
+        .where(and(
+          eq(publication.platformId, platformId),
+          inArray(publication.chapterId, db.select({ id: chapter.id }).from(chapter).where(eq(chapter.novelId, novelId))),
+        ))
+        .run();
+    }
+  })();
 }
 
 export function unbindPlatform(db: Db, novelId: number, platformId: number): void {
