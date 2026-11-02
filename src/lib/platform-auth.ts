@@ -5,6 +5,7 @@ import { parseFanqieBookId } from './fanqie-url';
 import { createFanqieClient, PlatformAuthError, type ClientFactory, type FanqieClient } from './fanqie-client';
 import { bindPlatform, SYNC_PLATFORM } from './platforms';
 import { UserError } from './result';
+import { isAuthSyncError } from './sync-status';
 
 export const clientForPlatform: ClientFactory = (db, platformId) => {
   const p = db.select().from(platform).where(eq(platform.id, platformId)).get();
@@ -68,4 +69,10 @@ export async function bindPlatformChecked(
     }
   }
   bindPlatform(db, novelId, platformId, bookUrl);
+}
+
+/** 是否有小说因认证失效而同步失败（设置页「认证已失效」状态）。 */
+export function hasAuthFailure(db: Db, platformId: number): boolean {
+  return db.select({ e: novelPlatform.lastSyncError }).from(novelPlatform).where(eq(novelPlatform.platformId, platformId)).all()
+    .some((r) => isAuthSyncError(r.e));
 }

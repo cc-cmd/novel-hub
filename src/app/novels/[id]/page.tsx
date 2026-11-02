@@ -60,11 +60,15 @@ export default async function NovelPage({
           {sync.error && <p className="text-sm text-red-700">{sync.error}</p>}
         </div>
         <RescanNovelButton novelId={n.id} hasSync={anyConfigured} />
-        <div id="manage-platforms">
+        <div id="manage-platforms" className="w-full sm:w-auto">
         <ManagePlatformsPanel
           novelId={n.id}
           defaultOpen={matrix.platforms.length === 0 || (!!fanqie && !fanqie.bookUrl)}
-          bindings={bindings.map((b) => ({ id: b.platform.id, name: b.platform.name, bound: b.bound, bookUrl: b.bookUrl, publicationCount: b.publicationCount }))}
+          bindings={bindings.map((b) => ({
+            id: b.platform.id, name: b.platform.name, bound: b.bound, bookUrl: b.bookUrl, publicationCount: b.publicationCount,
+            syncSupported: b.syncSupported, hasAuth: b.hasAuth, configured: b.configured,
+            lastSyncedAt: b.lastSyncedAt, lastSyncError: b.lastSyncError,
+          }))}
         />
         </div>
       </div>

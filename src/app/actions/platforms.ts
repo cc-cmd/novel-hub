@@ -2,7 +2,8 @@
 import { revalidatePath } from 'next/cache';
 import { getDb } from '@/db';
 import { wrap } from '@/lib/result';
-import { addPlatform, bindPlatform, deletePlatform, renamePlatform, unbindPlatform } from '@/lib/platforms';
+import { bindPlatformChecked, clearAuth, saveFanqieAuth } from '@/lib/platform-auth';
+import { addPlatform, deletePlatform, renamePlatform, unbindPlatform } from '@/lib/platforms';
 
 const refresh = () => {
   revalidatePath('/');
@@ -20,7 +21,13 @@ export async function deletePlatformAction(id: number) {
   return wrap(() => { deletePlatform(getDb(), id); refresh(); });
 }
 export async function bindPlatformAction(novelId: number, platformId: number, bookUrl: string | null) {
-  return wrap(() => { bindPlatform(getDb(), novelId, platformId, bookUrl); refresh(); });
+  return wrap(async () => { await bindPlatformChecked(getDb(), novelId, platformId, bookUrl); refresh(); });
+}
+export async function savePlatformAuthAction(platformId: number, cookie: string, csrfToken: string) {
+  return wrap(async () => { await saveFanqieAuth(getDb(), platformId, { cookie, csrfToken }); refresh(); });
+}
+export async function clearPlatformAuthAction(platformId: number) {
+  return wrap(() => { clearAuth(getDb(), platformId); refresh(); });
 }
 export async function unbindPlatformAction(novelId: number, platformId: number) {
   return wrap(() => { unbindPlatform(getDb(), novelId, platformId); refresh(); });
