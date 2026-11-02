@@ -8,6 +8,8 @@ import { ManagePlatformsPanel } from '@/components/manage-platforms-panel';
 import { MatrixTable } from '@/components/matrix-table';
 import { MatrixToolbar } from '@/components/matrix-toolbar';
 import { ProblemFiles } from '@/components/problem-files';
+import { SetupChecklist } from '@/components/setup-checklist';
+import { SyncStrip } from '@/components/sync-strip';
 import { RescanNovelButton } from '@/components/rescan-novel-button';
 import { listChapters, listProblems } from '@/lib/chapters';
 import { getMatrix, parseFilter } from '@/lib/matrix';
@@ -37,6 +39,9 @@ export default async function NovelPage({
   const platformId = parsePositiveInt(sp.platform);
   const matrix = getMatrix(db, n.id, { filter, platformId });
   const bindings = listBindings(db, n.id);
+  const fanqie = bindings.find((b) => b.syncSupported && b.bound);
+  const anyConfigured = matrix.platforms.some((p) => p.configured);
+  const fanqiePlatform = matrix.platforms.find((p) => p.id === fanqie?.platform.id);
   const problems = listProblems(db, n.id);
   const all = listChapters(db, n.id);
   const totalWords = all.filter((c) => !c.fileMissing).reduce((s, c) => s + c.wordCount, 0);
@@ -54,13 +59,20 @@ export default async function NovelPage({
           <ChapterSubdirEditor novelId={n.id} value={n.chapterSubdir} />
           {sync.error && <p className="text-sm text-red-700">{sync.error}</p>}
         </div>
-        <RescanNovelButton novelId={n.id} />
+        <RescanNovelButton novelId={n.id} hasSync={anyConfigured} />
+        <div id="manage-platforms">
         <ManagePlatformsPanel
           novelId={n.id}
-          defaultOpen={matrix.platforms.length === 0}
+          defaultOpen={matrix.platforms.length === 0 || (!!fanqie && !fanqie.bookUrl)}
           bindings={bindings.map((b) => ({ id: b.platform.id, name: b.platform.name, bound: b.bound, bookUrl: b.bookUrl, publicationCount: b.publicationCount }))}
         />
+        </div>
       </div>
+
+      {fanqie && !fanqie.configured && <SetupChecklist hasAuth={fanqie.hasAuth} hasLink={!!fanqie.bookUrl} />}
+      {fanqiePlatform?.configured && (
+        <SyncStrip lastSyncedAt={fanqiePlatform.lastSyncedAt} lastSyncError={fanqiePlatform.lastSyncError} changedCount={matrix.changedCount} />
+      )}
 
       <ProblemFiles problems={problems} />
 
@@ -76,15 +88,19 @@ export default async function NovelPage({
         </div>
       ) : (
         <>
-          <MatrixToolbar
-            novelId={n.id}
-            filter={filter}
-            platformId={matrix.platformId}
-            counts={matrix.counts}
-            shown={matrix.rows.length}
-            total={matrix.total}
-            platforms={matrix.platforms.map((p) => ({ id: p.id, name: p.name }))}
-          />
+          {anyConfigured ? (
+            <MatrixToolbar
+              novelId={n.id}
+              filter={filter}
+              platformId={matrix.platformId}
+              counts={matrix.counts}
+              shown={matrix.rows.length}
+              total={matrix.total}
+              platforms={matrix.platforms.filter((p) => p.configured).map((p) => ({ id: p.id, name: p.name }))}
+            />
+          ) : (
+            <p className="ml-auto font-mono text-xs text-stone-600">共 {matrix.total} 章</p>
+          )}
           <MatrixTable novelId={n.id} platforms={matrix.platforms} rows={matrix.rows} filter={filter} />
         </>
       )}

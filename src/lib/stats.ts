@@ -1,6 +1,7 @@
 // src/lib/stats.ts
 import type { Db } from '@/db';
 import { libraryRoot, novel, novelPlatform, platform, type Novel } from '@/db/schema';
+import { SYNC_PLATFORM } from './platforms';
 
 export type Sort = 'recent' | 'name' | 'stale';
 export const parseSort = (v: string | undefined): Sort => (v === 'name' || v === 'stale' ? v : 'recent');
@@ -8,11 +9,12 @@ export const parseSort = (v: string | undefined): Sort => (v === 'name' || v ===
 export interface PlatformStat {
   platformId: number;
   platformName: string;
+  configured: boolean;
   published: number;
-  pending: number;
   stale: number;
   unpublished: number;
-  missing: number;
+  lastSyncedAt: number | null;
+  lastSyncError: string | null;
 }
 export interface NovelStat {
   novel: Novel;
@@ -30,15 +32,10 @@ export interface Dashboard {
   rootCount: number;
 }
 
-/**
- * 「需更新」的 SQL 形式，必须与 publish.ts 的 isStale 等价（c = chapter, p = publication）：
- *   !file_missing && status ∈ {pending_review, published} && content_hash 非空 && (published_hash 为空 || ≠ content_hash)
- * 由 stats.test.ts 的随机对拍保证一致，修改任一处必须同时修改另一处。
- */
-const STALE = `(c.file_missing = 0
-  AND p.status IN ('pending_review','published')
-  AND c.content_hash IS NOT NULL AND c.content_hash <> ''
-  AND (p.published_hash IS NULL OR p.published_hash = '' OR p.published_hash <> c.content_hash))`;
+/** 「已配置」的 SQL 形式，必须与 platforms.ts 的 isSyncConfigured 等价（pl = platform, np = novel_platform；参数 1 = SYNC_PLATFORM）。 */
+const CONFIGURED = `(pl.name = ? AND pl.cookie IS NOT NULL AND pl.cookie <> ''
+  AND pl.csrf_token IS NOT NULL AND pl.csrf_token <> ''
+  AND np.book_id IS NOT NULL AND np.book_id <> '')`;
 
 const Q_CHAPTERS = `
   SELECT n.id AS novel_id,
@@ -51,21 +48,22 @@ const Q_CHAPTERS = `
 
 const Q_PLATFORMS = `
   SELECT np.novel_id, np.platform_id,
-         SUM(CASE WHEN c.file_missing = 1 THEN 1 ELSE 0 END) AS missing,
-         SUM(CASE WHEN ${STALE} THEN 1 ELSE 0 END) AS stale,
-         SUM(CASE WHEN c.file_missing = 0 AND p.status = 'published' AND NOT ${STALE} THEN 1 ELSE 0 END) AS published,
-         SUM(CASE WHEN c.file_missing = 0 AND p.status = 'pending_review' AND NOT ${STALE} THEN 1 ELSE 0 END) AS pending
+         SUM(CASE WHEN p.status = 'published' THEN 1 ELSE 0 END) AS published,
+         SUM(CASE WHEN p.status = 'stale' THEN 1 ELSE 0 END) AS stale
   FROM novel_platform np
+  JOIN platform pl ON pl.id = np.platform_id
   JOIN chapter c ON c.novel_id = np.novel_id
   LEFT JOIN publication p ON p.chapter_id = c.id AND p.platform_id = np.platform_id
+  WHERE ${CONFIGURED}
   GROUP BY np.novel_id, np.platform_id`;
 
 const Q_STALE_CHAPTERS = `
   SELECT c.novel_id, COUNT(DISTINCT c.id) AS n
   FROM chapter c
   JOIN novel_platform np ON np.novel_id = c.novel_id
+  JOIN platform pl ON pl.id = np.platform_id
   JOIN publication p ON p.chapter_id = c.id AND p.platform_id = np.platform_id
-  WHERE ${STALE}
+  WHERE ${CONFIGURED} AND p.status = 'stale'
   GROUP BY c.novel_id`;
 
 export function getDashboard(db: Db, opts: { showArchived?: boolean; sort?: Sort } = {}): Dashboard {
@@ -75,11 +73,16 @@ export function getDashboard(db: Db, opts: { showArchived?: boolean; sort?: Sort
       .map((r) => [r.novel_id, r]),
   );
   const platRows = new Map(
-    (raw.prepare(Q_PLATFORMS).all() as Array<{ novel_id: number; platform_id: number; missing: number; stale: number; published: number; pending: number }>)
+    (raw.prepare(Q_PLATFORMS).all(SYNC_PLATFORM) as Array<{ novel_id: number; platform_id: number; published: number; stale: number }>)
       .map((r) => [`${r.novel_id}:${r.platform_id}`, r]),
   );
   const staleRows = new Map(
-    (raw.prepare(Q_STALE_CHAPTERS).all() as Array<{ novel_id: number; n: number }>).map((r) => [r.novel_id, r.n]),
+    (raw.prepare(Q_STALE_CHAPTERS).all(SYNC_PLATFORM) as Array<{ novel_id: number; n: number }>).map((r) => [r.novel_id, r.n]),
+  );
+  const configuredKeys = new Set(
+    (raw.prepare(
+      `SELECT np.novel_id, np.platform_id FROM novel_platform np JOIN platform pl ON pl.id = np.platform_id WHERE ${CONFIGURED}`,
+    ).all(SYNC_PLATFORM) as Array<{ novel_id: number; platform_id: number }>).map((r) => `${r.novel_id}:${r.platform_id}`),
   );
   const platformNames = new Map(db.select().from(platform).all().map((p) => [p.id, p.name]));
   const bindings = db.select().from(novelPlatform).orderBy(novelPlatform.platformId).all();
@@ -97,12 +100,17 @@ export function getDashboard(db: Db, opts: { showArchived?: boolean; sort?: Sort
           .filter((b) => b.novelId === n.id)
           .map((b) => {
             const r = platRows.get(`${n.id}:${b.platformId}`);
-            const [published, pending, stale, missing] = [r?.published ?? 0, r?.pending ?? 0, r?.stale ?? 0, r?.missing ?? 0];
+            const configured = configuredKeys.has(`${n.id}:${b.platformId}`);
+            const [published, stale] = [r?.published ?? 0, r?.stale ?? 0];
             return {
               platformId: b.platformId,
               platformName: platformNames.get(b.platformId) ?? '',
-              published, pending, stale, missing,
-              unpublished: chapterCount - published - pending - stale - missing,
+              configured,
+              published,
+              stale,
+              unpublished: configured ? chapterCount - published - stale : 0,
+              lastSyncedAt: b.lastSyncedAt,
+              lastSyncError: b.lastSyncError,
             };
           });
         return {

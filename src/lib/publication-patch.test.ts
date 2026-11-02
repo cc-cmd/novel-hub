@@ -12,7 +12,7 @@ describe('buildInfoPatch', () => {
     expect(p.publishedAt).toBe(new Date('2026-01-02T03:04').getTime());
   });
   it('edited then cleared sends null', () => {
-    expect(buildInfoPatch({ status: 'pending_review', url: '', at: '', atDirty: true }).publishedAt).toBeNull();
+    expect(buildInfoPatch({ status: 'published', url: '', at: '', atDirty: true }).publishedAt).toBeNull();
   });
   it('unpublished never sends publishedAt', () => {
     expect('publishedAt' in buildInfoPatch({ status: 'unpublished', url: '', at: 'x', atDirty: true })).toBe(false);

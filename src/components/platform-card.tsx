@@ -1,12 +1,13 @@
 'use client';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { updatePublicationInfoAction } from '@/app/actions/publications';
 import type { MatrixCell } from '@/lib/matrix';
 import { buildInfoPatch } from '@/lib/publication-patch';
+import { fmtSyncTime } from '@/lib/sync-status';
 import { Badge } from './badge';
 import { useNotice } from './notice';
-import { PublicationActions } from './publication-actions';
 
 const toLocalInput = (ms: number | null) => {
   if (!ms) return '';
@@ -14,8 +15,8 @@ const toLocalInput = (ms: number | null) => {
   return d.toISOString().slice(0, 16);
 };
 
-export function PlatformCard({ cell, chapterId, chapterLabel, fileMissing }: {
-  cell: MatrixCell; chapterId: number; chapterLabel: string; fileMissing: boolean;
+export function PlatformCard({ cell, chapterId, novelId }: {
+  cell: MatrixCell; chapterId: number; novelId: number;
 }) {
   const router = useRouter();
   const { notify } = useNotice();
@@ -34,17 +35,35 @@ export function PlatformCard({ cell, chapterId, chapterLabel, fileMissing }: {
       router.refresh();
     });
 
+  if (!cell.configured) {
+    return (
+      <section className="space-y-1 rounded border bg-stone-50 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="font-semibold">{cell.platformName}</h3>
+          <span className="text-stone-500">—</span>
+        </div>
+        <p className="text-xs text-stone-600">
+          未配置，无状态。{cell.syncSupported ? <Link className="underline" href="/settings#fanqie">去配置</Link> : '暂不支持自动校验。'}
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-3 rounded border bg-white p-4">
       <div className="flex items-center gap-2">
         <h3 className="font-semibold">{cell.platformName}</h3>
-        <Badge kind={cell.badge} title={cell.hint} />
+        <Badge kind={cell.badge ?? cell.status} title={cell.hint} />
       </div>
-      {cell.hint && <p className="text-xs text-stone-600">{cell.hint}</p>}
-      <PublicationActions
-        chapterId={chapterId} platformId={cell.platformId} platformName={cell.platformName} chapterLabel={chapterLabel}
-        status={cell.status} fileMissing={fileMissing} platformUrl={cell.platformUrl}
-      />
+      <p className="text-xs text-stone-600">
+        状态由{cell.platformName}同步 · {cell.lastSyncedAt ? `最近同步：${fmtSyncTime(cell.lastSyncedAt)}` : '尚未同步'}
+        {cell.platformWordCount !== null && <><br />同步时线上 <span className="font-mono">{cell.platformWordCount}</span> 字</>}
+      </p>
+      {cell.changedSinceSync && (
+        <p role="status" className="rounded border border-orange-300 bg-orange-50 p-2 text-xs text-orange-900">
+          本地已改动，这里的状态要等重新扫描才更新。<Link className="font-bold underline" href={`/novels/${novelId}`}>去重新扫描</Link>
+        </p>
+      )}
       <div className="space-y-2 text-sm">
         {cell.status !== 'unpublished' && (
           <label className="block">发布时间

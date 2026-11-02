@@ -8,7 +8,7 @@ import type { CopyPayload } from '@/lib/copy';
 import type { CopyMode } from '@/lib/publish';
 import { useNotice } from './notice';
 
-export function CopyMenu({ chapterId, fileMissing }: { chapterId: number; fileMissing: boolean }) {
+export function CopyMenu({ chapterId, fileMissing, label }: { chapterId: number; fileMissing: boolean; label?: string }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ export function CopyMenu({ chapterId, fileMissing }: { chapterId: number; fileMi
   return (
     <div className="relative inline-block">
       <div className="inline-flex overflow-hidden rounded border">
-        <button className="px-3" disabled={busy} onClick={() => run('both')}>{done ? '已复制 ✓' : '复制'}</button>
+        <button className="px-3" disabled={busy} onClick={() => run('both')}>{done ? '已复制 ✓' : (label ?? '复制')}</button>
         <button className="border-l px-2" aria-label="更多复制方式" aria-expanded={open} onClick={() => setOpen(!open)}>▾</button>
       </div>
       {open && (

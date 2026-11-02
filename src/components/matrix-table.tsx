@@ -1,27 +1,20 @@
 'use client';
 import Link from 'next/link';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { Filter, MatrixRow } from '@/lib/matrix';
-import type { Badge as BadgeKind, PublishStatus } from '@/lib/types';
+import { staleReason } from '@/lib/sync-status';
 import { Badge } from './badge';
 import { CopyMenu } from './copy-menu';
-import { PublicationActions } from './publication-actions';
-
-const BADGE_OF: Record<PublishStatus, BadgeKind> = { unpublished: 'unpublished', pending_review: 'pending_review', published: 'published', stale: 'stale' };
 
 export function MatrixTable({
   novelId, platforms, rows, filter,
 }: {
   novelId: number;
-  platforms: Array<{ id: number; name: string; bookUrl: string | null }>;
+  platforms: Array<{ id: number; name: string; bookUrl: string | null; configured: boolean }>;
   rows: MatrixRow[];
   filter: Filter;
 }) {
   const [open, setOpen] = useState<string | null>(null);
-  // 乐观覆盖：key = `${chapterId}:${platformId}`，值为预期状态；失败时置 null 回滚
-  const [override, setOverride] = useState<Record<string, PublishStatus | null>>({});
-  // router.refresh() 带来新的 rows 后，由服务端数据接管，清除所有乐观覆盖
-  useEffect(() => setOverride({}), [rows]);
 
   if (rows.length === 0) {
     return (
@@ -32,13 +25,14 @@ export function MatrixTable({
   }
   return (
     <div className="overflow-x-auto rounded border bg-white">
-      <table className="w-full text-sm">
+      <table className="w-full min-w-[720px] text-sm">
         <thead className="bg-stone-100 text-left">
           <tr>
             <th className="p-2">章号</th><th className="p-2">标题</th><th className="p-2 text-right">字数</th>
             {platforms.map((p) => (
               <th key={p.id} className="p-2">
-                {p.bookUrl ? <a className="underline" href={p.bookUrl} target="_blank" rel="noreferrer">{p.name} ↗</a> : p.name}
+                {p.configured && p.bookUrl ? <a className="underline" href={p.bookUrl} target="_blank" rel="noreferrer">{p.name} ↗</a> : p.name}
+                {!p.configured && <span className="font-normal text-stone-500" title="未配置，无状态"> · 未配置</span>}
               </th>
             ))}
             <th className="p-2">操作</th>
@@ -47,24 +41,36 @@ export function MatrixTable({
         <tbody>
           {rows.map(({ chapter: ch, cells }) => {
             const openCell = cells.find((c) => open === `${ch.id}:${c.platformId}`);
+            const changed = cells.some((c) => c.changedSinceSync);
             return (
               <Fragment key={ch.id}>
                 <tr className="border-t">
                   <td className="p-2 font-mono">{ch.seq}</td>
                   <td className="p-2 font-serif">
-                    {ch.fileMissing ? ch.title : <Link className="underline" href={`/novels/${novelId}/chapters/${ch.id}`}>{ch.title}</Link>}
+                    {ch.fileMissing ? (
+                      <>
+                        <span className="text-stone-600">{ch.title}</span>
+                        <span className="ml-2 rounded border border-dashed border-red-400 bg-red-50 px-1.5 font-sans text-xs font-medium text-red-700" title="本地文件缺失，本章未参与同步，状态保持不变">! 文件丢失</span>
+                      </>
+                    ) : (
+                      <Link className="underline" href={`/novels/${novelId}/chapters/${ch.id}`}>{ch.title}</Link>
+                    )}
+                    {changed && <span className="ml-2 whitespace-nowrap font-sans text-xs text-orange-800">同步后有改动</span>}
                   </td>
                   <td className="p-2 text-right font-mono">{ch.fileMissing ? '—' : ch.wordCount}</td>
                   {cells.map((c) => {
                     const key = `${ch.id}:${c.platformId}`;
-                    const ov = override[key];
-                    const badge = ov ? BADGE_OF[ov] : c.badge;
-                    const clickable = !(ch.fileMissing && c.status === 'unpublished');
                     return (
-                      <td key={c.platformId} className="p-2">
-                        <button disabled={!clickable} aria-expanded={open === key} onClick={() => setOpen(open === key ? null : key)}>
-                          <Badge kind={badge} title={c.hint} />
-                        </button>
+                      <td key={c.platformId} className={`p-2 ${c.configured ? '' : 'bg-stone-50'}`}>
+                        {!c.badge ? (
+                          <span className="text-stone-500" title={c.hint}>—</span>
+                        ) : c.badge === 'stale' ? (
+                          <button aria-label={`第${ch.seq}章 ${c.platformName}：需更新，查看差异`} aria-expanded={open === key} title={c.hint} onClick={() => setOpen(open === key ? null : key)}>
+                            <Badge kind="stale" suffix=" ▾" />
+                          </button>
+                        ) : (
+                          <Badge kind={c.badge} title={c.hint} />
+                        )}
                       </td>
                     );
                   })}
@@ -78,20 +84,20 @@ export function MatrixTable({
                   </td>
                 </tr>
                 {openCell && (
-                  <tr className="bg-stone-50">
+                  <tr className="border-t border-orange-300 bg-orange-50 text-orange-900">
                     <td colSpan={4 + platforms.length} className="p-3">
-                      <div className="mb-1 text-xs text-stone-500">{openCell.platformName}</div>
-                      <PublicationActions
-                        chapterId={ch.id}
-                        platformId={openCell.platformId}
-                        platformName={openCell.platformName}
-                        chapterLabel={`第${ch.seq}章`}
-                        status={openCell.status}
-                        fileMissing={ch.fileMissing}
-                        platformUrl={openCell.platformUrl}
-                        editHref={`/novels/${novelId}/chapters/${ch.id}`}
-                        onOptimistic={(next) => setOverride((o) => ({ ...o, [`${ch.id}:${openCell.platformId}`]: next }))}
-                      />
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        <span className="font-bold">{staleReason(openCell.platformWordCount, ch.wordCount)}</span>
+                        <span className="text-xs">
+                          本地 <b className="font-mono font-medium">{ch.fileMissing ? '—' : ch.wordCount}</b> 字 · 线上 <b className="font-mono font-medium">{openCell.platformWordCount ?? '—'}</b> 字
+                        </span>
+                        <span className="flex-1" />
+                        <CopyMenu chapterId={ch.id} fileMissing={ch.fileMissing} label="复制标题+正文" />
+                        {platforms.find((p) => p.id === openCell.platformId)?.bookUrl && (
+                          <a className="underline" href={platforms.find((p) => p.id === openCell.platformId)!.bookUrl!} target="_blank" rel="noreferrer">打开{openCell.platformName}后台 ↗</a>
+                        )}
+                        <span className="basis-full text-xs">在{openCell.platformName}覆盖后点“重新扫描”，状态会自动更新。覆盖会重新审核，请确认已定稿。</span>
+                      </div>
                     </td>
                   </tr>
                 )}
