@@ -1,9 +1,11 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { rescanAction } from '@/app/actions/library';
+import { scanAllLocalAction, syncPlatformsAction } from '@/app/actions/library';
 import { AddRootForm } from './add-root-form';
 import { useNotice } from './notice';
+import { runRescanAll, unwrap } from '@/lib/rescan-flow';
+import { buildRescanNotice } from '@/lib/sync-notice';
 import type { Sort } from '@/lib/stats';
 
 export function DashboardToolbar(p: { novelCount: number; rootCount: number; showArchived: boolean; sort: Sort }) {
@@ -11,6 +13,7 @@ export function DashboardToolbar(p: { novelCount: number; rootCount: number; sho
   const { notify } = useNotice();
   const [adding, setAdding] = useState(false);
   const [scanning, startScan] = useTransition();
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const nav = (archived: boolean, sort: Sort) => {
     const q = new URLSearchParams();
@@ -21,15 +24,21 @@ export function DashboardToolbar(p: { novelCount: number; rootCount: number; sho
   };
 
   const scan = async (prefix?: string) => {
-    const r = await rescanAction();
-    if (!r.ok) return notify({ kind: 'error', text: r.error });
-    const s = r.data;
-    const changed = s.chapters.added + s.chapters.updated + s.chapters.restored;
-    notify({
-      kind: s.errors.length ? 'warn' : 'success',
-      text: prefix ?? `新增 ${s.newNovels} 本、更新 ${changed} 章、${s.issues} 个文件无法识别`,
-    });
-    router.refresh();
+    try {
+      const { summary: s, platformSync } = await runRescanAll(
+        { local: async () => unwrap(await scanAllLocalAction()), sync: async (id) => unwrap(await syncPlatformsAction(id)) },
+        setProgress,
+      );
+      const changed = s.chapters.added + s.chapters.updated + s.chapters.restored;
+      const issues = s.issues > 0 ? `、${s.issues} 个文件无法识别` : '';
+      const n = buildRescanNotice(prefix ?? `本地扫描完成：新增 ${s.newNovels} 本、更新 ${changed} 章${issues}`, platformSync, 'all');
+      notify({ kind: s.errors.length ? 'warn' : n.kind, text: n.text });
+    } catch (e) {
+      notify({ kind: 'error', text: (e as Error).message });
+    } finally {
+      setProgress(null);
+      router.refresh();
+    }
   };
 
   return (
@@ -48,8 +57,8 @@ export function DashboardToolbar(p: { novelCount: number; rootCount: number; sho
           <option value="name">名称</option>
           <option value="stale">需更新数</option>
         </select>
-        <button className="rounded border px-4" disabled={scanning} onClick={() => startScan(() => scan())}>
-          {scanning ? '扫描中…' : '重新扫描'}
+        <button className="min-w-[110px] rounded border px-4" disabled={scanning} onClick={() => startScan(() => scan())}>
+          {progress ? `同步中 ${progress.done}/${progress.total}…` : scanning ? '扫描中…' : '重新扫描'}
         </button>
         <button className="rounded bg-stone-900 px-4 text-white" aria-expanded={adding} onClick={() => setAdding(!adding)}>添加小说目录</button>
       </div>

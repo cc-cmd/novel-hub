@@ -3,6 +3,9 @@ import { revalidatePath } from 'next/cache';
 import { getDb } from '@/db';
 import { wrap } from '@/lib/result';
 import { addRoot, removeRoot, setArchived, setChapterSubdir } from '@/lib/library';
+import { clientForPlatform } from '@/lib/platform-auth';
+import { syncNovelPlatforms } from '@/lib/platform-sync';
+import { listSyncableNovels } from '@/lib/rescan';
 import { scanAndSync, syncNovel } from '@/lib/sync';
 
 function refresh() {
@@ -26,19 +29,36 @@ export async function removeRootAction(id: number) {
   });
 }
 
-export async function rescanAction() {
+/** 手动重新扫描：忽略 mtime/size 短路；同步由客户端随后逐本调用 syncPlatformsAction。 */
+export async function scanAllLocalAction() {
   return wrap(() => {
-    const s = scanAndSync(getDb(), { force: true }); // 手动重新扫描：忽略 mtime/size 短路
-    refresh();
-    return s;
+    try {
+      const db = getDb();
+      const s = scanAndSync(db, { force: true });
+      return { ...s, syncable: listSyncableNovels(db, s.failedNovelIds) };
+    } finally {
+      refresh();
+    }
   });
 }
 
-export async function rescanNovelAction(novelId: number) {
+export async function scanNovelLocalAction(novelId: number) {
   return wrap(() => {
-    const r = syncNovel(getDb(), novelId, { force: true });
-    refresh();
-    return r;
+    try {
+      return syncNovel(getDb(), novelId, { force: true });
+    } finally {
+      refresh();
+    }
+  });
+}
+
+export async function syncPlatformsAction(novelId: number) {
+  return wrap(async () => {
+    try {
+      return await syncNovelPlatforms(getDb(), novelId, clientForPlatform);
+    } finally {
+      refresh();
+    }
   });
 }
 
