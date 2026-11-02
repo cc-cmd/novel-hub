@@ -88,8 +88,21 @@ describe('REQ-07 新增列', () => {
     expect(cols(db, 'novel_platform')).toEqual(expect.arrayContaining(['book_id', 'last_synced_at', 'last_sync_error']));
     expect(cols(db, 'publication')).toEqual(expect.arrayContaining(['platform_item_id', 'platform_word_count', 'synced_at']));
   });
+
+  it('重开同一个库文件（再次迁移）后既有发布记录保留', () => {
+    const file = path.join(makeTmpDir().dir, 'reopen.db');
+    const db = createDb(file);
+    const n = insertNovel(db, '/x/A');
+    const [fanqie] = db.select().from(platform).all();
+    const ch = db.insert(chapter).values({ novelId: n.id, seq: 1, title: 'T', filePath: '/x/A/Ch01.md' }).returning().get();
+    db.insert(publication).values({ chapterId: ch.id, platformId: fanqie.id, status: 'published', publishedHash: 'h' }).run();
+    db.$client.close();
+    const again = createDb(file);
+    expect(again.select().from(publication).all()).toMatchObject([{ status: 'published', publishedHash: 'h' }]);
+  });
 });
 ```
+（该测试用到的导入：`path from 'node:path'`、`createDb from '@/db'`、`chapter, platform, publication from '@/db/schema'`、`insertNovel, makeTmpDir from '@/test/helpers'`，缺哪个补哪个。）
 
 若该文件顶部尚未导入 `describe/it/expect`，保持与文件现有导入一致（该文件是 Vitest 测试，补齐缺失的导入即可）。
 
@@ -710,12 +723,15 @@ export function bindPlatform(db: Db, novelId: number, platformId: number, bookUr
   const raw = (bookUrl ?? '').trim();
   const url = isSync ? (raw ? (parseFanqieBookId(raw), raw) : null) : validateUrl(bookUrl, '作品主页链接');
   const bookId = isSync && url ? parseFanqieBookId(url) : null;
+  const prev = db.select().from(novelPlatform)
+    .where(and(eq(novelPlatform.novelId, novelId), eq(novelPlatform.platformId, platformId))).get();
+  // 只有换了作品才清空同步记录；重复保存同一链接不能抹掉已记录的「认证已失效」
+  const switched = !!prev && prev.bookId !== bookId;
   db.insert(novelPlatform)
     .values({ novelId, platformId, bookUrl: url, bookId })
     .onConflictDoUpdate({
       target: [novelPlatform.novelId, novelPlatform.platformId],
-      // 换了作品 → 之前的同步结果不再适用
-      set: { bookUrl: url, bookId, lastSyncedAt: null, lastSyncError: null },
+      set: { bookUrl: url, bookId, ...(switched ? { lastSyncedAt: null, lastSyncError: null } : {}) },
     })
     .run();
 }
@@ -770,7 +786,7 @@ export function listBindings(db: Db, novelId: number): Binding[] {
 ```ts
 import { eq } from 'drizzle-orm';
 import type { Db } from '@/db';
-import { platform } from '@/db/schema';
+import { novelPlatform, platform } from '@/db/schema';
 import { parseFanqieBookId } from './fanqie-url';
 import { createFanqieClient, PlatformAuthError, type ClientFactory, type FanqieClient } from './fanqie-client';
 import { bindPlatform, SYNC_PLATFORM } from './platforms';
@@ -844,7 +860,7 @@ export async function bindPlatformChecked(
 - [ ] **Step 5: 运行测试与类型检查**
 
 Run: `npx vitest run src/lib/platform-auth.test.ts src/lib/platforms.test.ts && npx tsc --noEmit`
-Expected: PASS。若 `platforms.test.ts` 里已有用非番茄格式 URL 绑定番茄的旧测试失败，把该测试的 URL 改为样例番茄链接（这是行为变更所致）。
+Expected: PASS。必做修改：`src/lib/platforms.test.ts` 约第 58 行的旧用例用 `https://fanqie.example/book/1` 绑定番茄，行为变更后会被拒绝，把该 URL 改为 `https://fanqienovel.com/main/writer/chapter-manage/1`，并确认该用例其余断言（如 `bookUrl`）同步改成这个值。
 
 - [ ] **Step 6: 提交**
 
@@ -1637,7 +1653,7 @@ export async function syncPlatformsAction(novelId: number) {
 }
 ```
 
-`src/components/notice.tsx`：`NoticeInput` 增加 `alert?: { text: string; link?: { href: string; label: string } };`，顶部 `import Link from 'next/link';`。把现有提示条和下面的错误条放在同一个容器里：
+`src/components/notice.tsx`：`NoticeInput` 增加 `alert?: { text: string; link?: { href: string; label: string } };`，顶部 `import Link from 'next/link';`。把现有提示条和下面的错误条放进同一个 Fragment：现有组件只返回 `{n && <div>…</div>}`，把它与下面的 alert 一起包进 `<>…</>`（`Ctx.Provider` 内、`{children}` 之前）：
 
 ```tsx
       {n?.alert && (
@@ -1699,7 +1715,7 @@ export function useRescanNovel(novelId: number, prefix = '') {
 import { useRescanNovel } from './use-rescan-novel';
 
 /** hasSync：这本书有已配置平台时按钮作为主操作，并显示同步阶段（F7.20）。 */
-export function RescanNovelButton({ novelId, hasSync }: { novelId: number; hasSync: boolean }) {
+export function RescanNovelButton({ novelId, hasSync = false }: { novelId: number; hasSync?: boolean }) {
   const { pending, stage, rescan } = useRescanNovel(novelId);
   const label = !pending ? '重新扫描' : !hasSync ? '扫描中…' : stage === 'local' ? '扫描本地文件…' : '同步番茄…';
   return (
@@ -1762,7 +1778,7 @@ git commit -m "feat: sync configured platforms on rescan with staged progress" -
 - Create: `src/lib/sync-status.ts`、`src/components/sync-strip.tsx`、`src/components/setup-checklist.tsx`
 - Modify: `src/app/actions/publications.ts`、`src/components/badge.tsx`、`src/components/matrix-table.tsx`、`src/components/platform-card.tsx`、`src/components/platform-cards.tsx`、`src/components/ratio-bar.tsx`、`src/components/novel-card.tsx`
 - Modify: `src/app/page.tsx`、`src/app/novels/[id]/page.tsx`、`src/components/copy-menu.tsx`
-- Test: 新增 `src/lib/sync-status.test.ts`；重写 `src/lib/matrix.test.ts`、`src/lib/stats.test.ts`、`src/lib/publications.test.ts`；改 `src/lib/publish.test.ts`、`src/lib/publication-patch.test.ts`（如需要）
+- Test: 新增 `src/lib/sync-status.test.ts`；重写 `src/lib/matrix.test.ts`、`src/lib/stats.test.ts`、`src/lib/publications.test.ts`；改 `src/lib/publish.test.ts`、`src/lib/publication-patch.test.ts`（后者把测试里的 `'pending_review'` 状态改为 `'published'`，类型收窄后必须改）
 
 **Interfaces:**
 - Produces：
@@ -2483,7 +2499,7 @@ export interface PlatformStat {
             };
           });
 ```
-注意：`!!r` 依赖 `Q_PLATFORMS` 对已配置且有章节的绑定才返回行。**0 章的已配置绑定没有行**（`JOIN chapter`），会被误判为未配置。改为：先单独算出已配置集合：
+**实现时直接写最终形式（用 `configuredKeys`，不要写 `configured: !!r`）。** 原因：`!!r` 依赖 `Q_PLATFORMS` 对已配置且有章节的绑定才返回行。**0 章的已配置绑定没有行**（`JOIN chapter`），会被误判为未配置。改为：先单独算出已配置集合：
 
 ```ts
   const configuredKeys = new Set(
@@ -2719,7 +2735,7 @@ export function SetupChecklist({ hasAuth, hasLink }: { hasAuth: boolean; hasLink
     );
   }
 ```
-（`MatrixCell` 另加 `syncSupported: boolean`，`makeCell` 里取 `pl.name === SYNC_PLATFORM`，从 `./platforms` 导入。）已配置时，把原 `{cell.hint && …}` 与 `PublicationActions` 替换为：
+（已配置分支的徽标写 `<Badge kind={cell.badge ?? cell.status} …/>`，因为 `MatrixCell.badge` 现在是 `Badge | null`。`MatrixCell` 另加 `syncSupported: boolean`，`makeCell` 里取 `pl.name === SYNC_PLATFORM`，从 `./platforms` 导入。）已配置时，把原 `{cell.hint && …}` 与 `PublicationActions` 替换为：
 
 ```tsx
       <p className="text-xs text-stone-600">
@@ -3096,6 +3112,8 @@ git commit -m "feat: platform auth panel and binding sync status" -m "Co-Authore
 （每个文件只写与其相关的那一句。）
 
 - [ ] **Step 2: 更新根 `README.md`** — 功能表"平台与发布矩阵 / 过期提示"两行改为 REQ-07 口径，并新增一行"平台同步：番茄配置认证与作品链接后，重新扫描自动同步 未发布/已发布/需更新"；"使用方式"补一节"配置番茄同步"（设置页填认证 → 小说详情页绑定番茄并填章节管理页链接 → 重新扫描）。
+
+- [ ] **Step 2b: 旧库升级验证** — 复制现有 `data/novel-hub.db` 为 `/tmp`-外的临时文件（放在 scratchpad），用 `NOVEL_HUB_DB=<副本> npm run dev` 启动，确认首页能打开、旧发布记录仍在库中（`sqlite3 <副本> 'select count(*) from publication'` 与升级前一致）。
 
 - [ ] **Step 3: 用真实番茄账号验证接口假设**
 
