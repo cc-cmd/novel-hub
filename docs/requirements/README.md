@@ -10,6 +10,7 @@
 | [REQ-04](REQ-04-stale-detection.md) | 过期提示（需更新） | P0 | 02, 03 |
 | [REQ-05](REQ-05-copy-body.md) | 一键复制正文 | P1 | 02 |
 | [REQ-06](REQ-06-dashboard.md) | 总览看板 | P1 | 01–04 |
+| [REQ-07](REQ-07-platform-sync.md) | 平台连接校验与发布状态自动同步（**非 MVP**，仅番茄） | P1 | 01–04 |
 
 建议实现顺序：01 → 02 → 03 → 04 → 05 → 06。
 
