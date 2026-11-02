@@ -1,6 +1,7 @@
 import { and, count, eq } from 'drizzle-orm';
 import type { Db } from '@/db';
 import { chapter, novelPlatform, platform, publication, type Platform } from '@/db/schema';
+import { parseFanqieBookId } from './fanqie-url';
 import { UserError } from './result';
 
 function cleanName(input: string, selfId?: number, db?: Db): string {
@@ -63,11 +64,29 @@ export function validateUrl(input: string | null | undefined, label: string): st
   return v;
 }
 
+export const SYNC_PLATFORM = '番茄';
+
+export function isSyncConfigured(x: { name: string; cookie: string | null; csrfToken: string | null; bookId: string | null }): boolean {
+  return x.name === SYNC_PLATFORM && !!x.cookie && !!x.csrfToken && !!x.bookId;
+}
+
 export function bindPlatform(db: Db, novelId: number, platformId: number, bookUrl?: string | null): void {
-  const url = validateUrl(bookUrl, '作品主页链接');
+  const p = db.select().from(platform).where(eq(platform.id, platformId)).get();
+  if (!p) throw new UserError('平台不存在');
+  const isSync = p.name === SYNC_PLATFORM;
+  const raw = (bookUrl ?? '').trim();
+  const url = isSync ? (raw ? (parseFanqieBookId(raw), raw) : null) : validateUrl(bookUrl, '作品主页链接');
+  const bookId = isSync && url ? parseFanqieBookId(url) : null;
+  const prev = db.select().from(novelPlatform)
+    .where(and(eq(novelPlatform.novelId, novelId), eq(novelPlatform.platformId, platformId))).get();
+  // 只有换了作品才清空同步记录；重复保存同一链接不能抹掉已记录的「认证已失效」
+  const switched = !!prev && prev.bookId !== bookId;
   db.insert(novelPlatform)
-    .values({ novelId, platformId, bookUrl: url })
-    .onConflictDoUpdate({ target: [novelPlatform.novelId, novelPlatform.platformId], set: { bookUrl: url } })
+    .values({ novelId, platformId, bookUrl: url, bookId })
+    .onConflictDoUpdate({
+      target: [novelPlatform.novelId, novelPlatform.platformId],
+      set: { bookUrl: url, bookId, ...(switched ? { lastSyncedAt: null, lastSyncError: null } : {}) },
+    })
     .run();
 }
 
@@ -80,6 +99,11 @@ export interface Binding {
   bound: boolean;
   bookUrl: string | null;
   publicationCount: number;
+  syncSupported: boolean;
+  hasAuth: boolean;
+  configured: boolean;
+  lastSyncedAt: number | null;
+  lastSyncError: string | null;
 }
 
 export function listBindings(db: Db, novelId: number): Binding[] {
@@ -89,15 +113,23 @@ export function listBindings(db: Db, novelId: number): Binding[] {
     .from(platform)
     .orderBy(platform.id)
     .all()
-    .map((p) => ({
-      platform: p,
-      bound: links.has(p.id),
-      bookUrl: links.get(p.id)?.bookUrl ?? null,
-      publicationCount: db
-        .select({ c: count() })
-        .from(publication)
-        .innerJoin(chapter, eq(chapter.id, publication.chapterId))
-        .where(and(eq(chapter.novelId, novelId), eq(publication.platformId, p.id)))
-        .get()!.c,
-    }));
+    .map((p) => {
+      const link = links.get(p.id);
+      return {
+        platform: p,
+        bound: !!link,
+        bookUrl: link?.bookUrl ?? null,
+        publicationCount: db
+          .select({ c: count() })
+          .from(publication)
+          .innerJoin(chapter, eq(chapter.id, publication.chapterId))
+          .where(and(eq(chapter.novelId, novelId), eq(publication.platformId, p.id)))
+          .get()!.c,
+        syncSupported: p.name === SYNC_PLATFORM,
+        hasAuth: !!p.cookie && !!p.csrfToken,
+        configured: !!link && isSyncConfigured({ name: p.name, cookie: p.cookie, csrfToken: p.csrfToken, bookId: link.bookId }),
+        lastSyncedAt: link?.lastSyncedAt ?? null,
+        lastSyncError: link?.lastSyncError ?? null,
+      };
+    });
 }
