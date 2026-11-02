@@ -7,7 +7,7 @@ import { Badge } from './badge';
 import { CopyMenu } from './copy-menu';
 import { PublicationActions } from './publication-actions';
 
-const BADGE_OF: Record<PublishStatus, BadgeKind> = { unpublished: 'unpublished', pending_review: 'pending_review', published: 'published' };
+const BADGE_OF: Record<PublishStatus, BadgeKind> = { unpublished: 'unpublished', pending_review: 'pending_review', published: 'published', stale: 'stale' };
 
 export function MatrixTable({
   novelId, platforms, rows, filter,
