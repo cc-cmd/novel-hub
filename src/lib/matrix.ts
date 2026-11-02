@@ -26,6 +26,8 @@ export interface Matrix {
   rows: MatrixRow[];
   counts: { all: number; stale: number; unpublished: number };
   total: number;
+  /** 实际生效的平台筛选；URL 里指向未绑定平台时归为 null。 */
+  platformId: number | null;
 }
 
 function makeCell(ch: Chapter, pl: { id: number; name: string }, pub?: Publication): MatrixCell {
@@ -67,7 +69,8 @@ export function getMatrix(db: Db, novelId: number, opts: { filter?: Filter; plat
     cells: platforms.map((pl) => makeCell(ch, pl, byKey.get(`${ch.id}:${pl.id}`))),
   }));
 
-  const scoped = (r: MatrixRow) => (opts.platformId ? r.cells.filter((c) => c.platformId === opts.platformId) : r.cells);
+  const platformId = opts.platformId && platforms.some((p) => p.id === opts.platformId) ? opts.platformId : null;
+  const scoped = (r: MatrixRow) => (platformId ? r.cells.filter((c) => c.platformId === platformId) : r.cells);
   const has = (r: MatrixRow, b: Badge) => scoped(r).some((c) => c.badge === b);
   const counts = {
     all: all.length,
@@ -76,7 +79,7 @@ export function getMatrix(db: Db, novelId: number, opts: { filter?: Filter; plat
   };
   const filter = opts.filter ?? 'all';
   const rows = filter === 'all' ? all : all.filter((r) => has(r, filter === 'stale' ? 'stale' : 'unpublished'));
-  return { platforms, rows, counts, total: all.length };
+  return { platforms, rows, counts, total: all.length, platformId };
 }
 
 export function getChapterCells(db: Db, chapterId: number): MatrixCell[] {

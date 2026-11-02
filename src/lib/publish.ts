@@ -90,6 +90,12 @@ export function toPublishBody(markdown: string): string {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '').replace(/\s+$/, '');
 }
 
+/**
+ * 转换规则版本。修改 toPublishBody / buildPublishForm / hash 的任何行为时必须 +1：
+ * 启动时发现库内版本较旧，会让所有章节在下次同步时重算 content_hash（REQ-02 F2.12）。
+ */
+export const PUBLISH_RULES_VERSION = 1;
+
 export const platformTitle = (seq: number, title: string) => `第${seq}章 ${title}`;
 
 export function resolveTitle(markdown: string, fallbackTitle: string): { title: string; h1: H1Info | null } {

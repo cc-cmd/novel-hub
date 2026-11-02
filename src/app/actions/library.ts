@@ -28,7 +28,7 @@ export async function removeRootAction(id: number) {
 
 export async function rescanAction() {
   return wrap(() => {
-    const s = scanAndSync(getDb());
+    const s = scanAndSync(getDb(), { force: true }); // 手动重新扫描：忽略 mtime/size 短路
     refresh();
     return s;
   });

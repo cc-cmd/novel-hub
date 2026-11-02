@@ -16,6 +16,17 @@ function setup() {
 }
 
 describe('getMatrix', () => {
+  it('platform 参数指向未绑定平台时归为全部平台', () => {
+    const s = setup();
+    s.mk(1);
+    unbindPlatform(s.db, s.n.id, s.qidian.id);
+    const m = getMatrix(s.db, s.n.id, { filter: 'unpublished', platformId: s.qidian.id });
+    expect(m.platformId).toBeNull();
+    expect(m.counts.unpublished).toBe(1);
+    expect(m.rows).toHaveLength(1);
+    expect(getMatrix(s.db, s.n.id, { platformId: s.fanqie.id }).platformId).toBe(s.fanqie.id);
+  });
+
   it('AC3.3 只显示已绑定平台的列', () => {
     const s = setup();
     unbindPlatform(s.db, s.n.id, s.qidian.id);

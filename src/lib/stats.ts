@@ -22,6 +22,8 @@ export interface NovelStat {
   staleChapters: number;
   lastChangedAt: number | null;
   platforms: PlatformStat[];
+  /** 单本统计失败时填入，卡片只显示该错误而不拖垮整页（REQ-06 §8）。 */
+  error?: string;
 }
 export interface Dashboard {
   novels: NovelStat[];
@@ -87,30 +89,34 @@ export function getDashboard(db: Db, opts: { showArchived?: boolean; sort?: Sort
     .from(novel)
     .all()
     .filter((n) => opts.showArchived || !n.archived)
-    .map((n) => {
-      const c = chapterRows.get(n.id);
-      const chapterCount = c?.chapter_count ?? 0;
-      const platforms: PlatformStat[] = bindings
-        .filter((b) => b.novelId === n.id)
-        .map((b) => {
-          const r = platRows.get(`${n.id}:${b.platformId}`);
-          const [published, pending, stale, missing] = [r?.published ?? 0, r?.pending ?? 0, r?.stale ?? 0, r?.missing ?? 0];
-          return {
-            platformId: b.platformId,
-            platformName: platformNames.get(b.platformId) ?? '',
-            published, pending, stale, missing,
-            unpublished: chapterCount - published - pending - stale - missing,
-          };
-        });
-      return {
-        novel: n,
-        chapterCount,
-        wordCount: c?.word_count ?? 0,
-        missingCount: c?.missing ?? 0,
-        staleChapters: staleRows.get(n.id) ?? 0,
-        lastChangedAt: c?.last_mtime ?? null,
-        platforms,
-      };
+    .map((n): NovelStat => {
+      try {
+        const c = chapterRows.get(n.id);
+        const chapterCount = c?.chapter_count ?? 0;
+        const platforms: PlatformStat[] = bindings
+          .filter((b) => b.novelId === n.id)
+          .map((b) => {
+            const r = platRows.get(`${n.id}:${b.platformId}`);
+            const [published, pending, stale, missing] = [r?.published ?? 0, r?.pending ?? 0, r?.stale ?? 0, r?.missing ?? 0];
+            return {
+              platformId: b.platformId,
+              platformName: platformNames.get(b.platformId) ?? '',
+              published, pending, stale, missing,
+              unpublished: chapterCount - published - pending - stale - missing,
+            };
+          });
+        return {
+          novel: n,
+          chapterCount,
+          wordCount: c?.word_count ?? 0,
+          missingCount: c?.missing ?? 0,
+          staleChapters: staleRows.get(n.id) ?? 0,
+          lastChangedAt: c?.last_mtime ?? null,
+          platforms,
+        };
+      } catch (e) {
+        return { novel: n, chapterCount: 0, wordCount: 0, missingCount: 0, staleChapters: 0, lastChangedAt: null, platforms: [], error: (e as Error).message };
+      }
     });
 
   const sort = opts.sort ?? 'recent';

@@ -79,7 +79,7 @@ export default async function NovelPage({
           <MatrixToolbar
             novelId={n.id}
             filter={filter}
-            platformId={platformId}
+            platformId={matrix.platformId}
             counts={matrix.counts}
             shown={matrix.rows.length}
             total={matrix.total}

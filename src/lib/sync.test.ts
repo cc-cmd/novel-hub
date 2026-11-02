@@ -202,3 +202,19 @@ describe('scanAndSync', () => {
     expect(s2.chapters.added).toBe(1);
   });
 });
+
+describe('scanAndSync force', () => {
+  it('保留 mtime 且大小不变的改动：普通扫描发现不了，force 可以', () => {
+    const { db, n, dir } = setup({ 'Ch01-甲.md': '# 第1章 甲\n\naaaa\n' });
+    syncNovel(db, n.id);
+    const file = path.join(dir, 'Ch01-甲.md');
+    const st = fs.statSync(file);
+    fs.writeFileSync(file, '# 第1章 甲\n\nbbbb\n');
+    fs.utimesSync(file, st.atimeMs / 1000, st.mtimeMs / 1000); // 模拟 rsync -t / cp -p；Date 会丢亚毫秒
+    const before = db.select().from(chapter).get()!.contentHash;
+    scanAndSync(db);
+    expect(db.select().from(chapter).get()!.contentHash).toBe(before);
+    scanAndSync(db, { force: true });
+    expect(db.select().from(chapter).get()!.contentHash).not.toBe(before);
+  });
+});

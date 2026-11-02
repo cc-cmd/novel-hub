@@ -45,7 +45,22 @@ export function ChapterEditor(p: Props) {
     if (!dirty) return;
     const h = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
+    // 站内 <Link> 导航不触发 beforeunload：在捕获阶段拦截同源链接点击
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a || a.target === '_blank' || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin || (url.pathname === window.location.pathname && url.search === window.location.search)) return;
+      if (!window.confirm('有未保存的修改，确定离开吗？')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener('click', onClick, true);
+    return () => {
+      window.removeEventListener('beforeunload', h);
+      document.removeEventListener('click', onClick, true);
+    };
   }, [dirty]);
 
   // 仅「放弃并重新加载」流程：refresh 完成（refreshing 变 false）后，用新 props 覆盖本地状态

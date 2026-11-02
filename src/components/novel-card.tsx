@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { RetryButton } from './retry-button';
 import type { NovelStat } from '@/lib/stats';
 import { CardMenu } from './card-menu';
 import { RatioBar } from './ratio-bar';
@@ -27,7 +28,12 @@ export function NovelCard({ s }: { s: NovelStat }) {
         <CardMenu novelId={n.id} name={n.name} archived={n.archived} />
       </header>
 
-      {s.platforms.length === 0 ? (
+      {s.error ? (
+        <div role="alert" className="flex items-center gap-2 text-sm text-red-800">
+          统计失败：<span className="font-mono text-xs">{s.error}</span>
+          <RetryButton />
+        </div>
+      ) : s.platforms.length === 0 ? (
         <p className="text-sm text-stone-600">
           未绑定平台。<Link className="underline" href={`/novels/${n.id}`}>去绑定</Link>
         </p>

@@ -164,7 +164,7 @@ export interface FullSyncSummary extends ScanSummary {
   errors: string[];
 }
 
-export function scanAndSync(db: Db): FullSyncSummary {
+export function scanAndSync(db: Db, opts: { force?: boolean } = {}): FullSyncSummary {
   const scan = scanLibrary(db);
   const out: FullSyncSummary = {
     ...scan,
@@ -174,7 +174,7 @@ export function scanAndSync(db: Db): FullSyncSummary {
   };
   for (const n of db.select().from(novel).where(eq(novel.archived, false)).all()) {
     try {
-      const r = syncNovel(db, n.id);
+      const r = syncNovel(db, n.id, opts);
       out.chapters.added += r.added;
       out.chapters.updated += r.updated;
       out.chapters.restored += r.restored;
