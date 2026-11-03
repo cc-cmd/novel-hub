@@ -162,6 +162,7 @@ export interface FullSyncSummary extends ScanSummary {
   chapters: { added: number; updated: number; restored: number; markedMissing: number };
   issues: number;
   errors: string[];
+  failedNovelIds: number[];
 }
 
 export function scanAndSync(db: Db, opts: { force?: boolean } = {}): FullSyncSummary {
@@ -171,6 +172,7 @@ export function scanAndSync(db: Db, opts: { force?: boolean } = {}): FullSyncSum
     chapters: { added: 0, updated: 0, restored: 0, markedMissing: 0 },
     issues: 0,
     errors: [],
+    failedNovelIds: [],
   };
   for (const n of db.select().from(novel).where(eq(novel.archived, false)).all()) {
     try {
@@ -180,9 +182,13 @@ export function scanAndSync(db: Db, opts: { force?: boolean } = {}): FullSyncSum
       out.chapters.restored += r.restored;
       out.chapters.markedMissing += r.markedMissing;
       out.issues += r.issues;
-      if (r.error) out.errors.push(`${n.name}：${r.error}`);
+      if (r.error) {
+        out.errors.push(`${n.name}：${r.error}`);
+        out.failedNovelIds.push(n.id);
+      }
     } catch (e) {
       out.errors.push(`${n.name}：${(e as Error).message}`);
+      out.failedNovelIds.push(n.id);
     }
   }
   return out;

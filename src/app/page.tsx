@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { isAuthSyncError } from '@/lib/sync-status';
 import { getDb } from '@/db';
 import { AddRootForm } from '@/components/add-root-form';
 import { DashboardToolbar } from '@/components/dashboard-toolbar';
@@ -40,6 +41,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ a
   return (
     <div className="space-y-4">
       <DashboardToolbar novelCount={dash.novels.length} rootCount={dash.rootCount} showArchived={showArchived} sort={sort} />
+
+      {dash.novels.some((s) => s.platforms.some((p) => p.configured && isAuthSyncError(p.lastSyncError))) && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded border border-dashed border-red-400 bg-red-50 px-4 py-2 text-sm font-medium text-red-800">
+          番茄认证已失效，所有小说暂停同步，各章状态未改动。
+          <Link href="/settings#fanqie" className="font-bold underline">去设置</Link>
+        </div>
+      )}
 
       {(badRoots.length > 0 || syncWarnings.length > 0) && (
         <div role="alert" className="space-y-1 rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">

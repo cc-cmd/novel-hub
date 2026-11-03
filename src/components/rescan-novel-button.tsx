@@ -1,22 +1,13 @@
 'use client';
-import { useRouter } from 'next/navigation';
-import { useTransition } from 'react';
-import { rescanNovelAction } from '@/app/actions/library';
-import { useNotice } from './notice';
+import { useRescanNovel } from './use-rescan-novel';
 
-export function RescanNovelButton({ novelId }: { novelId: number }) {
-  const [pending, start] = useTransition();
-  const router = useRouter();
-  const { notify } = useNotice();
+/** hasSync：这本书有已配置平台时按钮作为主操作，并显示同步阶段（F7.20）。 */
+export function RescanNovelButton({ novelId, hasSync = false }: { novelId: number; hasSync?: boolean }) {
+  const { pending, stage, rescan } = useRescanNovel(novelId);
+  const label = !pending ? '重新扫描' : !hasSync ? '扫描中…' : stage === 'local' ? '扫描本地文件…' : '同步番茄…';
   return (
-    <button className="rounded border px-4" disabled={pending}
-      onClick={() => start(async () => {
-        const r = await rescanNovelAction(novelId);
-        if (!r.ok) return notify({ kind: 'error', text: r.error });
-        notify({ kind: 'success', text: `扫描完成：新增 ${r.data.added} 章、更新 ${r.data.updated} 章、${r.data.issues} 个文件无法识别` });
-        router.refresh();
-      })}>
-      {pending ? '扫描中…' : '重新扫描'}
+    <button className={`min-w-[124px] rounded px-4 ${hasSync ? 'bg-stone-900 font-medium text-white' : 'border'}`} disabled={pending} onClick={() => rescan()}>
+      {label}
     </button>
   );
 }

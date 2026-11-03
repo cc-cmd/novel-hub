@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createDb } from './index';
-import { chapter, novel, platform } from './schema';
+import { chapter, novel, platform, publication } from './schema';
+import { insertNovel, makeDb, makeTmpDir } from '@/test/helpers';
 
 describe('createDb', () => {
   it('migrates and seeds builtin platforms idempotently', () => {
@@ -30,5 +31,29 @@ describe('createDb', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('REQ-07 新增列', () => {
+  const cols = (db: ReturnType<typeof makeDb>, table: string) =>
+    (db.$client.pragma(`table_info(${table})`) as Array<{ name: string }>).map((c) => c.name);
+
+  it('platform / novel_platform / publication 带有同步所需列', () => {
+    const db = makeDb();
+    expect(cols(db, 'platform')).toEqual(expect.arrayContaining(['cookie', 'csrf_token']));
+    expect(cols(db, 'novel_platform')).toEqual(expect.arrayContaining(['book_id', 'last_synced_at', 'last_sync_error']));
+    expect(cols(db, 'publication')).toEqual(expect.arrayContaining(['platform_item_id', 'platform_word_count', 'synced_at']));
+  });
+
+  it('重开同一个库文件（再次迁移）后既有发布记录保留', () => {
+    const file = path.join(makeTmpDir().dir, 'reopen.db');
+    const db = createDb(file);
+    const n = insertNovel(db, '/x/A');
+    const [fanqie] = db.select().from(platform).all();
+    const ch = db.insert(chapter).values({ novelId: n.id, seq: 1, title: 'T', filePath: '/x/A/Ch01.md' }).returning().get();
+    db.insert(publication).values({ chapterId: ch.id, platformId: fanqie.id, status: 'published', publishedHash: 'h' }).run();
+    db.$client.close();
+    const again = createDb(file);
+    expect(again.select().from(publication).all()).toMatchObject([{ status: 'published', publishedHash: 'h' }]);
   });
 });

@@ -1,3 +1,3 @@
-export type PublishStatus = 'unpublished' | 'pending_review' | 'published';
-export type Badge = 'unpublished' | 'pending_review' | 'published' | 'stale' | 'missing';
+export type PublishStatus = 'unpublished' | 'published' | 'stale';
+export type Badge = PublishStatus;
 export type ChapterWarning = 'h1_mismatch' | 'no_h1' | 'encoding' | null;

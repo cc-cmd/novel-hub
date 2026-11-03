@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { chapter, platform, publication } from '@/db/schema';
-import { insertNovel, makeDb } from '@/test/helpers';
+import { chapter, novelPlatform, platform, publication } from '@/db/schema';
+import { configureFanqie, insertNovel, makeDb } from '@/test/helpers';
 import { UserError } from './result';
-import { addPlatform, bindPlatform, deletePlatform, listBindings, listPlatforms, renamePlatform, unbindPlatform } from './platforms';
+import { addPlatform, bindPlatform, deletePlatform, isSyncConfigured, listBindings, listPlatforms, renamePlatform, unbindPlatform } from './platforms';
 
 describe('平台管理', () => {
   it('AC3.1 预置平台存在且不可删/改名', () => {
@@ -55,8 +55,8 @@ describe('绑定', () => {
     const n = insertNovel(db, '/x/A');
     const [fanqie] = listPlatforms(db);
     expect(() => bindPlatform(db, n.id, fanqie.id, 'ftp://x')).toThrow(UserError);
-    bindPlatform(db, n.id, fanqie.id, ' https://fanqie.example/book/1 ');
-    expect(listBindings(db, n.id).find((b) => b.platform.id === fanqie.id)).toMatchObject({ bound: true, bookUrl: 'https://fanqie.example/book/1' });
+    bindPlatform(db, n.id, fanqie.id, ' https://fanqienovel.com/main/writer/chapter-manage/1 ');
+    expect(listBindings(db, n.id).find((b) => b.platform.id === fanqie.id)).toMatchObject({ bound: true, bookUrl: 'https://fanqienovel.com/main/writer/chapter-manage/1' });
     bindPlatform(db, n.id, fanqie.id, ''); // 再次绑定 = 更新链接
     expect(listBindings(db, n.id)[0].bookUrl).toBeNull();
   });
@@ -80,4 +80,75 @@ describe('绑定', () => {
 it('platform 表由迁移预置，且 seed 幂等', () => {
   const db = makeDb();
   expect(db.select().from(platform).all()).toHaveLength(2);
+});
+
+describe('REQ-07 已配置判定与绑定', () => {
+  it('isSyncConfigured：番茄 + cookie + csrf + bookId 缺一不可', () => {
+    const ok = { name: '番茄', cookie: 'c', csrfToken: 't', bookId: '1' };
+    expect(isSyncConfigured(ok)).toBe(true);
+    expect(isSyncConfigured({ ...ok, name: '起点' })).toBe(false);
+    expect(isSyncConfigured({ ...ok, cookie: null })).toBe(false);
+    expect(isSyncConfigured({ ...ok, csrfToken: '' })).toBe(false);
+    expect(isSyncConfigured({ ...ok, bookId: null })).toBe(false);
+  });
+  it('bindPlatform 番茄：解析 bookId；换链接时清空同步记录；listBindings 反映 configured', () => {
+    const db = makeDb();
+    const n = insertNovel(db, '/x/A');
+    const { platformId } = configureFanqie(db, n.id);
+    db.update(novelPlatform).set({ lastSyncedAt: 5, lastSyncError: 'x' }).run();
+    expect(listBindings(db, n.id).find((b) => b.platform.id === platformId)).toMatchObject({
+      bound: true, syncSupported: true, hasAuth: true, configured: true, lastSyncedAt: 5, lastSyncError: 'x',
+    });
+    bindPlatform(db, n.id, platformId, 'https://fanqienovel.com/main/writer/chapter-manage/42');
+    expect(db.select().from(novelPlatform).get()).toMatchObject({ bookId: '42', lastSyncedAt: null, lastSyncError: null });
+  });
+  it('bindPlatform 番茄：重复保存同一作品不清空同步记录', () => {
+    const db = makeDb();
+    const n = insertNovel(db, '/x/A');
+    const { platformId } = configureFanqie(db, n.id);
+    db.update(novelPlatform).set({ lastSyncedAt: 5, lastSyncError: 'x' }).run();
+    bindPlatform(db, n.id, platformId, 'https://fanqienovel.com/main/writer/chapter-manage/7670888040847395864');
+    expect(db.select().from(novelPlatform).get()).toMatchObject({ lastSyncedAt: 5, lastSyncError: 'x' });
+  });
+  it('bindPlatform 番茄：不填链接 → bookId 为空（未配置）', () => {
+    const db = makeDb();
+    const n = insertNovel(db, '/x/A');
+    const [fanqie] = listPlatforms(db);
+    bindPlatform(db, n.id, fanqie.id, '');
+    expect(db.select().from(novelPlatform).get()).toMatchObject({ bookUrl: null, bookId: null });
+  });
+});
+
+describe('bindPlatform 换绑作品', () => {
+  const urlOf = (id: string) => `https://fanqienovel.com/main/writer/chapter-manage/${id}&x?type=1`;
+
+  function seed() {
+    const db = makeDb();
+    const [fanqie] = listPlatforms(db);
+    const n = insertNovel(db, '/x/A');
+    bindPlatform(db, n.id, fanqie.id, urlOf('111'));
+    const c = db.insert(chapter).values({ novelId: n.id, seq: 1, title: 'T', filePath: '/x/1.md', wordCount: 1, contentHash: 'H' }).returning().get();
+    db.insert(publication).values({
+      chapterId: c.id, platformId: fanqie.id, status: 'published', publishedAt: 5, platformUrl: 'http://u',
+      publishedHash: 'H', platformItemId: 'i1', platformWordCount: 9, syncedAt: 7,
+    }).run();
+    const pub = () => db.select().from(publication).get()!;
+    return { db, fanqie, n, pub };
+  }
+
+  it('换绑到另一本书：旧书同步状态重置为未发布，记录保留', () => {
+    const s = seed();
+    bindPlatform(s.db, s.n.id, s.fanqie.id, urlOf('222'));
+    expect(s.pub()).toMatchObject({
+      status: 'unpublished', platformItemId: null, platformWordCount: null, syncedAt: null,
+      publishedAt: 5, platformUrl: 'http://u', publishedHash: 'H',
+    });
+  });
+
+  it('重复保存同一链接：记录不动', () => {
+    const s = seed();
+    const before = s.pub();
+    bindPlatform(s.db, s.n.id, s.fanqie.id, urlOf('111'));
+    expect(s.pub()).toEqual(before);
+  });
 });

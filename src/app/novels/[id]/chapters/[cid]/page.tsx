@@ -44,7 +44,7 @@ export default async function ChapterPage({ params }: { params: Promise<{ id: st
       readError={data.readError}
       seq={data.chapter.seq}
       fallbackTitle={data.chapter.title}
-      aside={<PlatformCards chapterId={data.chapter.id} seq={data.chapter.seq} fileMissing={data.chapter.fileMissing} />}
+      aside={<PlatformCards chapterId={data.chapter.id} novelId={n.id} />}
     />
   );
 }

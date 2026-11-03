@@ -50,6 +50,10 @@ export const platform = sqliteTable('platform', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull().unique(),
   builtin: integer('builtin', { mode: 'boolean' }).notNull().default(false),
+  cookie: text('cookie'),
+  csrfToken: text('csrf_token'),
+  useAi: integer('use_ai').notNull().default(2),
+  dailyWordLimit: integer('daily_word_limit').notNull().default(20000),
 });
 
 export const novelPlatform = sqliteTable(
@@ -58,6 +62,10 @@ export const novelPlatform = sqliteTable(
     novelId: integer('novel_id').notNull().references(() => novel.id),
     platformId: integer('platform_id').notNull().references(() => platform.id),
     bookUrl: text('book_url'),
+    bookId: text('book_id'),
+    lastSyncedAt: integer('last_synced_at'),
+    lastSyncError: text('last_sync_error'),
+    volumes: text('volumes'),
   },
   (t) => [primaryKey({ columns: [t.novelId, t.platformId] })],
 );
@@ -71,6 +79,11 @@ export const publication = sqliteTable(
     publishedAt: integer('published_at'),
     platformUrl: text('platform_url'),
     publishedHash: text('published_hash'),
+    platformItemId: text('platform_item_id'),
+    platformWordCount: integer('platform_word_count'),
+    syncedAt: integer('synced_at'),
+    submittedAt: integer('submitted_at'),
+    quotaWords: integer('quota_words'),
   },
   (t) => [primaryKey({ columns: [t.chapterId, t.platformId] })],
 );

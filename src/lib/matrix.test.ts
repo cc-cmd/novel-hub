@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { chapter, publication } from '@/db/schema';
-import { insertNovel, makeDb } from '@/test/helpers';
+import { eq } from 'drizzle-orm';
+import { chapter, platform, publication } from '@/db/schema';
+import { configureFanqie, insertNovel, makeDb } from '@/test/helpers';
 import { getChapterCells, getMatrix, parseFilter } from './matrix';
 import { bindPlatform, listPlatforms, unbindPlatform } from './platforms';
 
@@ -8,11 +9,13 @@ function setup() {
   const db = makeDb();
   const n = insertNovel(db, '/x/A');
   const [fanqie, qidian] = listPlatforms(db);
-  bindPlatform(db, n.id, fanqie.id);
-  bindPlatform(db, n.id, qidian.id);
+  configureFanqie(db, n.id); // 番茄：已配置
+  bindPlatform(db, n.id, qidian.id); // 起点：未配置
   const mk = (seq: number, over: Partial<typeof chapter.$inferInsert> = {}) =>
     db.insert(chapter).values({ novelId: n.id, seq, title: `T${seq}`, filePath: `/x/A/Ch${seq}.md`, contentHash: `H${seq}`, ...over }).returning().get();
-  return { db, n, fanqie, qidian, mk };
+  const pub = (chapterId: number, platformId: number, status: string) =>
+    db.insert(publication).values({ chapterId, platformId, status: status as never }).run();
+  return { db, n, fanqie, qidian, mk, pub };
 }
 
 describe('getMatrix', () => {
@@ -23,64 +26,83 @@ describe('getMatrix', () => {
     const m = getMatrix(s.db, s.n.id, { filter: 'unpublished', platformId: s.qidian.id });
     expect(m.platformId).toBeNull();
     expect(m.counts.unpublished).toBe(1);
-    expect(m.rows).toHaveLength(1);
     expect(getMatrix(s.db, s.n.id, { platformId: s.fanqie.id }).platformId).toBe(s.fanqie.id);
   });
 
-  it('AC3.3 只显示已绑定平台的列', () => {
+  it('AC3.3 只显示已绑定平台的列，并标注是否已配置', () => {
     const s = setup();
     unbindPlatform(s.db, s.n.id, s.qidian.id);
     s.mk(1);
     const m = getMatrix(s.db, s.n.id);
-    expect(m.platforms.map((p) => p.name)).toEqual(['番茄']);
-    expect(m.rows[0].cells).toHaveLength(1);
+    expect(m.platforms).toMatchObject([{ name: '番茄', configured: true }]);
   });
 
-  it('无记录等同未发布；徽标与计数', () => {
+  it('AC7.11/7.12 已配置列三态徽标；未配置列无徽标', () => {
     const s = setup();
-    const c1 = s.mk(1); // 番茄已发且一致
-    const c2 = s.mk(2); // 番茄已发但过期
-    s.mk(3); // 全未发
+    const c1 = s.mk(1);
+    const c2 = s.mk(2);
+    s.mk(3);
     const c4 = s.mk(4, { fileMissing: true });
-    s.db.insert(publication).values([
-      { chapterId: c1.id, platformId: s.fanqie.id, status: 'published', publishedHash: 'H1' },
-      { chapterId: c2.id, platformId: s.fanqie.id, status: 'published', publishedHash: 'OLD' },
-      { chapterId: c4.id, platformId: s.fanqie.id, status: 'published', publishedHash: 'H4' },
-    ]).run();
+    s.pub(c1.id, s.fanqie.id, 'published');
+    s.pub(c2.id, s.fanqie.id, 'stale');
+    s.pub(c4.id, s.fanqie.id, 'published');
+    s.pub(c1.id, s.qidian.id, 'published'); // 未配置平台的遗留记录：不展示
     const m = getMatrix(s.db, s.n.id);
-    expect(m.rows.map((r) => r.cells[0].badge)).toEqual(['published', 'stale', 'unpublished', 'missing']);
-    // 第 1、2 章在起点未发，第 3 章两个平台都未发 → 3；文件丢失的第 4 章不计入
-    expect(m.counts).toEqual({ all: 4, stale: 1, unpublished: 3 });
-    expect(m.total).toBe(4);
-    expect(m.rows[1].cells[0].hint).toContain('与 番茄 已发版本不一致');
+    expect(m.rows.map((r) => r.cells[0].badge)).toEqual(['published', 'stale', 'unpublished', 'published']);
+    expect(m.rows.map((r) => r.cells[1].badge)).toEqual([null, null, null, null]);
+    expect(m.rows[0].cells[0].hint).toBe('状态由番茄同步，点击重新扫描刷新');
+    expect(m.rows[0].cells[1]).toMatchObject({ configured: false, hint: '未配置，无状态' });
+    expect(m.counts).toEqual({ all: 4, stale: 1, unpublished: 1 });
   });
 
-  it('AC3.7 / 筛选语义：任一平台命中；平台下拉限定范围；missing 不算未发布', () => {
+  it('F7.22 同步后有改动：文件修改时间晚于该章同步时间；从未同步或文件丢失不算', () => {
+    const s = setup();
+    const c1 = s.mk(1, { mtimeMs: 2000 });
+    const c2 = s.mk(2, { mtimeMs: 500 });
+    const c3 = s.mk(3, { mtimeMs: 2000 });
+    const c4 = s.mk(4, { mtimeMs: 2000, fileMissing: true });
+    for (const c of [c1, c2, c4]) {
+      s.db.insert(publication).values({ chapterId: c.id, platformId: s.fanqie.id, status: 'published', syncedAt: 1000, platformWordCount: 77 }).run();
+    }
+    const m = getMatrix(s.db, s.n.id);
+    expect(m.rows.map((r) => r.cells[0].changedSinceSync)).toEqual([true, false, false, false]);
+    expect(m.changedCount).toBe(1);
+    expect(m.rows[0].cells[0].platformWordCount).toBe(77);
+    expect(c3.id).toBeGreaterThan(0);
+  });
+
+  it('清除认证 → 番茄变为未配置，整列无徽标', () => {
+    const s = setup();
+    const c = s.mk(1);
+    s.pub(c.id, s.fanqie.id, 'published');
+    s.db.update(platform).set({ cookie: null }).where(eq(platform.id, s.fanqie.id)).run();
+    const m = getMatrix(s.db, s.n.id);
+    expect(m.platforms.find((p) => p.name === '番茄')!.configured).toBe(false);
+    expect(m.rows[0].cells.map((x) => x.badge)).toEqual([null, null]);
+  });
+
+  it('MVP 遗留的 pending_review 按未发布展示', () => {
+    const s = setup();
+    const c = s.mk(1);
+    s.pub(c.id, s.fanqie.id, 'pending_review');
+    expect(getMatrix(s.db, s.n.id).rows[0].cells[0].badge).toBe('unpublished');
+  });
+
+  it('筛选：任一已配置平台命中；平台下拉限定范围；filter=all 返回全部', () => {
     const s = setup();
     const c1 = s.mk(1);
     s.mk(2);
-    s.mk(3, { fileMissing: true });
-    s.db.insert(publication).values([
-      { chapterId: c1.id, platformId: s.fanqie.id, status: 'published', publishedHash: 'H1' },
-      { chapterId: c1.id, platformId: s.qidian.id, status: 'published', publishedHash: 'H1' },
-    ]).run();
+    s.pub(c1.id, s.fanqie.id, 'stale');
+    expect(getMatrix(s.db, s.n.id, { filter: 'stale' }).rows.map((r) => r.chapter.seq)).toEqual([1]);
     expect(getMatrix(s.db, s.n.id, { filter: 'unpublished' }).rows.map((r) => r.chapter.seq)).toEqual([2]);
-    // 限定到番茄：第 1 章已发 → 不出现；第 2 章未发 → 出现
-    const m = getMatrix(s.db, s.n.id, { filter: 'unpublished', platformId: s.fanqie.id });
-    expect(m.rows.map((r) => r.chapter.seq)).toEqual([2]);
-    expect(m.counts.unpublished).toBe(1);
-  });
-
-  it('filter=all 返回全部', () => {
-    const s = setup();
-    s.mk(1);
-    s.mk(2);
+    expect(getMatrix(s.db, s.n.id, { filter: 'unpublished', platformId: s.qidian.id }).rows).toHaveLength(0); // 起点未配置，无状态
     expect(getMatrix(s.db, s.n.id, { filter: 'all' }).rows).toHaveLength(2);
   });
 });
 
 it('parseFilter', () => {
   expect(parseFilter('stale')).toBe('stale');
+  expect(parseFilter('unpublished')).toBe('unpublished');
   expect(parseFilter('xx')).toBe('all');
   expect(parseFilter(undefined)).toBe('all');
 });
@@ -89,6 +111,6 @@ describe('getChapterCells', () => {
   it('返回该章在每个已绑定平台的单元格', () => {
     const s = setup();
     const c = s.mk(1);
-    expect(getChapterCells(s.db, c.id).map((x) => [x.platformName, x.badge])).toEqual([['番茄', 'unpublished'], ['起点', 'unpublished']]);
+    expect(getChapterCells(s.db, c.id).map((x) => [x.platformName, x.configured, x.badge])).toEqual([['番茄', true, 'unpublished'], ['起点', false, null]]);
   });
 });

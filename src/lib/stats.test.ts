@@ -1,9 +1,8 @@
-// src/lib/stats.test.ts
 import { describe, expect, it } from 'vitest';
-import { chapter, libraryRoot, novel, publication } from '@/db/schema';
-import { insertNovel, makeDb } from '@/test/helpers';
-import { getMatrix } from './matrix';
-import { bindPlatform, listPlatforms } from './platforms';
+import { eq } from 'drizzle-orm';
+import { chapter, libraryRoot, novel, novelPlatform, platform, publication } from '@/db/schema';
+import { configureFanqie, insertNovel, makeDb } from '@/test/helpers';
+import { bindPlatform, isSyncConfigured, listPlatforms } from './platforms';
 import { getDashboard, parseSort } from './stats';
 import { setArchived } from './library';
 
@@ -14,47 +13,46 @@ function base() {
   const mkNovel = (name: string, over: Partial<typeof novel.$inferInsert> = {}) => insertNovel(db, `/x/${name}`, over);
   const mkCh = (novelId: number, seq: number, over: Partial<typeof chapter.$inferInsert> = {}) =>
     db.insert(chapter).values({ novelId, seq, title: `T${seq}`, filePath: `/x/${seq}.md`, wordCount: 100, contentHash: `H${seq}`, ...over }).returning().get();
-  const pub = (chapterId: number, platformId: number, status: 'unpublished' | 'pending_review' | 'published', publishedHash: string | null) =>
-    db.insert(publication).values({ chapterId, platformId, status, publishedHash }).run();
+  const pub = (chapterId: number, platformId: number, status: string) =>
+    db.insert(publication).values({ chapterId, platformId, status: status as never }).run();
   return { db, fanqie, qidian, mkNovel, mkCh, pub };
 }
 const stat = (db: Db, name: string) => getDashboard(db, { showArchived: true }).novels.find((n) => n.novel.name === name)!;
 
 describe('getDashboard 统计口径', () => {
-  it('AC6.1/6.2/6.8 章数、字数（不含丢失）、平台计数与恒等式', () => {
+  it('AC6.1/6.2 章数、字数（不含丢失）、已配置平台计数与恒等式', () => {
     const s = base();
     const n = s.mkNovel('A');
-    bindPlatform(s.db, n.id, s.fanqie.id);
-    bindPlatform(s.db, n.id, s.qidian.id);
-    const c1 = s.mkCh(n.id, 1); // 番茄已发（一致）
-    const c2 = s.mkCh(n.id, 2); // 番茄已发但过期
-    const c3 = s.mkCh(n.id, 3); // 番茄审核中（一致）
-    s.mkCh(n.id, 4); // 全未发
-    const c5 = s.mkCh(n.id, 5, { fileMissing: true, wordCount: 999 }); // 丢失
-    s.pub(c1.id, s.fanqie.id, 'published', 'H1');
-    s.pub(c2.id, s.fanqie.id, 'published', 'OLD');
-    s.pub(c3.id, s.fanqie.id, 'pending_review', 'H3');
-    s.pub(c5.id, s.fanqie.id, 'published', 'H5');
+    configureFanqie(s.db, n.id);
+    bindPlatform(s.db, n.id, s.qidian.id); // 未配置
+    const c1 = s.mkCh(n.id, 1);
+    const c2 = s.mkCh(n.id, 2);
+    s.mkCh(n.id, 3);
+    const c4 = s.mkCh(n.id, 4, { fileMissing: true, wordCount: 999 });
+    s.pub(c1.id, s.fanqie.id, 'published');
+    s.pub(c2.id, s.fanqie.id, 'stale');
+    s.pub(c4.id, s.fanqie.id, 'published');
+    s.pub(c1.id, s.qidian.id, 'published'); // 未配置：不计入
 
     const a = stat(s.db, 'A');
-    expect([a.chapterCount, a.wordCount, a.missingCount]).toEqual([5, 400, 1]);
-    expect(a.platforms[0]).toEqual({ platformId: s.fanqie.id, platformName: '番茄', published: 1, pending: 1, stale: 1, unpublished: 1, missing: 1 });
-    expect(a.platforms[1]).toMatchObject({ platformName: '起点', published: 0, pending: 0, stale: 0, unpublished: 4, missing: 1 });
-    for (const p of a.platforms) {
-      expect(p.published + p.pending + p.stale + p.unpublished + p.missing).toBe(a.chapterCount);
-    }
+    expect([a.chapterCount, a.wordCount, a.missingCount]).toEqual([4, 300, 1]);
+    expect(a.platforms[0]).toEqual({ platformId: s.fanqie.id, platformName: '番茄', configured: true, published: 2, stale: 1, unpublished: 1, lastSyncedAt: null, lastSyncError: null });
+    expect(a.platforms[1]).toEqual({ platformId: s.qidian.id, platformName: '起点', configured: false, published: 0, stale: 0, unpublished: 0, lastSyncedAt: null, lastSyncError: null });
+    expect(a.platforms[0].published + a.platforms[0].stale + a.platforms[0].unpublished).toBe(a.chapterCount);
     expect(a.staleChapters).toBe(1);
   });
 
-  it('AC6.3 过期 → 已发 −1、需更新 +1', () => {
+  it('F7.19 未配置的番茄（无认证 / 无链接）不计入，staleChapters 为 0', () => {
     const s = base();
     const n = s.mkNovel('A');
-    bindPlatform(s.db, n.id, s.fanqie.id);
+    configureFanqie(s.db, n.id);
     const c = s.mkCh(n.id, 1);
-    s.pub(c.id, s.fanqie.id, 'published', 'H1');
-    expect(stat(s.db, 'A').platforms[0]).toMatchObject({ published: 1, stale: 0 });
-    s.db.update(chapter).set({ contentHash: 'CHANGED' }).run();
-    expect(stat(s.db, 'A').platforms[0]).toMatchObject({ published: 0, stale: 1 });
+    s.pub(c.id, s.fanqie.id, 'stale');
+    expect(stat(s.db, 'A').staleChapters).toBe(1);
+    s.db.update(platform).set({ cookie: null }).where(eq(platform.id, s.fanqie.id)).run();
+    const a = stat(s.db, 'A');
+    expect(a.platforms[0]).toMatchObject({ configured: false, stale: 0 });
+    expect(a.staleChapters).toBe(0);
   });
 
   it('AC6.5 未绑定平台 → platforms 为空', () => {
@@ -63,28 +61,39 @@ describe('getDashboard 统计口径', () => {
     expect(stat(s.db, 'A').platforms).toEqual([]);
   });
 
-  it('绑定了平台但 0 章 → 各计数为 0；未绑定平台的发布记录不计入', () => {
+  it('绑定了平台但 0 章 → 计数为 0；未绑定平台的发布记录不计入', () => {
     const s = base();
     const n = s.mkNovel('A');
-    bindPlatform(s.db, n.id, s.fanqie.id);
-    expect(stat(s.db, 'A').platforms[0]).toMatchObject({ published: 0, pending: 0, stale: 0, unpublished: 0, missing: 0 });
+    configureFanqie(s.db, n.id);
+    expect(stat(s.db, 'A').platforms[0]).toMatchObject({ published: 0, stale: 0, unpublished: 0 });
+    expect(stat(s.db, 'A').platforms[0].configured).toBe(true);
     const c = s.mkCh(n.id, 1);
-    s.pub(c.id, s.qidian.id, 'published', 'H1'); // 起点未绑定
+    s.pub(c.id, s.qidian.id, 'published'); // 起点未绑定
     expect(stat(s.db, 'A').platforms.map((p) => p.platformName)).toEqual(['番茄']);
   });
 
-  it('卡片需更新数按「章」去重：两个平台都过期的同一章只算 1', () => {
-    const s = base();
-    const n = s.mkNovel('A');
-    bindPlatform(s.db, n.id, s.fanqie.id);
-    bindPlatform(s.db, n.id, s.qidian.id);
-    const c = s.mkCh(n.id, 1);
-    s.pub(c.id, s.fanqie.id, 'published', 'OLD');
-    s.pub(c.id, s.qidian.id, 'published', 'OLD');
-    const a = stat(s.db, 'A');
-    expect(a.staleChapters).toBe(1);
-    expect(a.platforms.map((p) => p.stale)).toEqual([1, 1]);
-  });
+  it.each([
+    ['空串 cookie', { cookie: '' }],
+    ['空串 csrf_token', { csrfToken: '' }],
+    ['book_id 为 null', { bookId: null }],
+    ['book_id 为空串', { bookId: '' }],
+    ['非番茄平台但有凭据与 book_id', { target: 'qidian' }],
+    ['完整配置', {}],
+  ] as Array<[string, { cookie?: string; csrfToken?: string; bookId?: string | null; target?: 'qidian' }]>)(
+    'SQL 已配置口径与 isSyncConfigured 等价：%s', (_label, o) => {
+      const s = base();
+      const n = s.mkNovel('A');
+      const p = o.target === 'qidian' ? s.qidian : s.fanqie;
+      s.db.update(platform).set({ cookie: o.cookie ?? 'c', csrfToken: o.csrfToken ?? 't' }).where(eq(platform.id, p.id)).run();
+      bindPlatform(s.db, n.id, p.id, 'https://fanqienovel.com/main/writer/chapter-manage/7670888040847395864&x?type=1');
+      const link = s.db.select().from(novelPlatform).get()!;
+      const bookId = 'bookId' in o ? o.bookId! : link.bookId;
+      s.db.update(novelPlatform).set({ bookId }).where(eq(novelPlatform.novelId, n.id)).run();
+      const row = s.db.select().from(platform).where(eq(platform.id, p.id)).get()!;
+      const expected = isSyncConfigured({ name: row.name, cookie: row.cookie, csrfToken: row.csrfToken, bookId });
+      expect(stat(s.db, 'A').platforms[0].configured).toBe(expected);
+    },
+  );
 
   it('F6.8 归档默认隐藏，且排在末尾', () => {
     const s = base();
@@ -100,11 +109,11 @@ describe('getDashboard 统计口径', () => {
     const s = base();
     const a = s.mkNovel('甲');
     const b = s.mkNovel('乙');
-    for (const n of [a, b]) bindPlatform(s.db, n.id, s.fanqie.id);
+    for (const n of [a, b]) configureFanqie(s.db, n.id);
     const ca = s.mkCh(a.id, 1, { mtimeMs: 1000 });
     const cb = s.mkCh(b.id, 1, { mtimeMs: 2000 });
-    s.pub(ca.id, s.fanqie.id, 'published', 'OLD'); // 甲有 1 章需更新
-    s.pub(cb.id, s.fanqie.id, 'published', 'H1');
+    s.pub(ca.id, s.fanqie.id, 'stale');
+    s.pub(cb.id, s.fanqie.id, 'published');
     const names = (sort: 'recent' | 'name' | 'stale') => getDashboard(s.db, { sort }).novels.map((x) => x.novel.name);
     expect(names('recent')).toEqual(['乙', '甲']);
     expect(names('stale')).toEqual(['甲', '乙']);
@@ -122,54 +131,16 @@ describe('getDashboard 统计口径', () => {
   });
 });
 
-describe('与详情页口径一致（AC4.8，随机对拍）', () => {
-  it('SQL 聚合 = deriveBadge 逐格统计', () => {
-    const s = base();
-    const n = s.mkNovel('R');
-    bindPlatform(s.db, n.id, s.fanqie.id);
-    bindPlatform(s.db, n.id, s.qidian.id);
-    let seed = 42;
-    const rnd = (k: number) => ((seed = (seed * 1664525 + 1013904223) >>> 0) % k);
-    const hashes = ['H', 'OTHER', null, ''];
-    for (let seq = 1; seq <= 300; seq++) {
-      const ch = s.mkCh(n.id, seq, { fileMissing: rnd(8) === 0, contentHash: seq % 17 === 0 ? null : `H${seq}` });
-      for (const p of [s.fanqie, s.qidian]) {
-        const kind = rnd(5);
-        if (kind === 0) continue; // 无记录
-        const status = (['unpublished', 'pending_review', 'published'] as const)[rnd(3)];
-        const h = rnd(3);
-        const publishedHash = h === 0 ? `H${seq}` : h === 1 ? 'OTHER' : hashes[2 + rnd(2)];
-        s.pub(ch.id, p.id, status, publishedHash);
-      }
-    }
-    const dash = stat(s.db, 'R');
-    const matrix = getMatrix(s.db, n.id);
-    matrix.platforms.forEach((pl, i) => {
-      const count = (b: string) => matrix.rows.filter((r) => r.cells[i].badge === b).length;
-      expect(dash.platforms[i]).toMatchObject({
-        platformId: pl.id,
-        published: count('published'),
-        pending: count('pending_review'),
-        stale: count('stale'),
-        unpublished: count('unpublished'),
-        missing: count('missing'),
-      });
-    });
-    expect(dash.staleChapters).toBe(matrix.counts.stale);
-  });
-});
-
 describe('F6.12 规模', () => {
-  it('20 本 × 500 章，3 条聚合查询应在 1 秒内完成', () => {
+  it('20 本 × 500 章，聚合查询应在 1 秒内完成', () => {
     const s = base();
     s.db.$client.transaction(() => {
       for (let i = 0; i < 20; i++) {
         const n = s.mkNovel(`N${i}`);
-        bindPlatform(s.db, n.id, s.fanqie.id);
-        bindPlatform(s.db, n.id, s.qidian.id);
+        configureFanqie(s.db, n.id);
         for (let seq = 1; seq <= 500; seq++) {
           const c = s.mkCh(n.id, seq);
-          if (seq % 2 === 0) s.pub(c.id, s.fanqie.id, 'published', seq % 10 === 0 ? 'OLD' : `H${seq}`);
+          if (seq % 2 === 0) s.pub(c.id, s.fanqie.id, seq % 10 === 0 ? 'stale' : 'published');
         }
       }
     })();

@@ -1,6 +1,6 @@
 // 唯一的「发布形态」转换实现。字数、hash、复制、需更新判断都依赖这里；不得在别处复制规则。
 
-import type { Badge, PublishStatus } from './types';
+import type { PublishStatus } from './types';
 
 export function parseChineseNumber(s: string): number | null {
   if (/^\d+$/.test(s)) return parseInt(s, 10);
@@ -107,58 +107,27 @@ export function buildPublishForm(markdown: string, seq: number, fallbackTitle: s
   return { title: platformTitle(seq, resolveTitle(markdown, fallbackTitle).title), body: toPublishBody(markdown) };
 }
 
+/** 发布形态正文 → 平台 HTML：每个非空行一个 <p>，转义 & < > " '（同 pipeline.py 的 to_html）。 */
+export function toPublishHtml(body: string): string {
+  const esc: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' };
+  return body
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => `<p>${l.replace(/[&<>"']/g, (c) => esc[c])}</p>`)
+    .join('');
+}
+
 export function countWords(body: string): number {
   return [...body.replace(/\s/g, '')].length;
 }
 
-export interface ChapterForBadge {
-  contentHash: string | null;
-  fileMissing: boolean;
-}
-export interface PublicationForBadge {
-  status: PublishStatus;
-  publishedHash: string | null;
+/** 库内 status 的读取口径：只有 published / stale 有意义，其余（含 MVP 遗留的 pending_review）按未发布。 */
+export function syncedStatus(raw: string | null | undefined): PublishStatus {
+  return raw === 'published' || raw === 'stale' ? raw : 'unpublished';
 }
 
-export const OVERWRITE_WARNING = '覆盖会重新审核，请确认已定稿。';
-
-/** 需更新 := status ∈ {pending_review, published} 且 published_hash ≠ content_hash。看板 SQL 必须与此等价。 */
-export function isStale(ch: ChapterForBadge, pub?: PublicationForBadge | null): boolean {
-  if (ch.fileMissing || !pub || pub.status === 'unpublished') return false;
-  if (!ch.contentHash) return false;
-  return !pub.publishedHash || pub.publishedHash !== ch.contentHash;
-}
-
-export function deriveBadge(ch: ChapterForBadge, pub?: PublicationForBadge | null): Badge {
-  if (ch.fileMissing) return 'missing';
-  if (!pub || pub.status === 'unpublished') return 'unpublished';
-  return isStale(ch, pub) ? 'stale' : pub.status;
-}
-
-function fmtDate(ms: number): string {
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-export function badgeHint(a: {
-  badge: Badge;
-  status: PublishStatus;
-  platformName: string;
-  mtimeMs?: number | null;
-}): string | undefined {
-  switch (a.badge) {
-    case 'pending_review':
-      return `平台审核中，暂不能修改该章${a.platformName === '番茄' ? '（番茄审核时段 7:00–24:00）' : ''}`;
-    case 'stale':
-      if (a.status === 'pending_review') return '本地内容已变更，待审核结束后再覆盖';
-      return `本地内容已${a.mtimeMs ? `于 ${fmtDate(a.mtimeMs)} ` : ''}变更，与 ${a.platformName} 已发版本不一致`;
-    case 'missing':
-      return '文件丢失';
-    default:
-      return undefined;
-  }
-}
+export const syncHint = (platformName: string) => `状态由${platformName}同步，点击重新扫描刷新`;
 
 export type CopyMode = 'both' | 'title' | 'body';
 
