@@ -52,6 +52,8 @@ export const platform = sqliteTable('platform', {
   builtin: integer('builtin', { mode: 'boolean' }).notNull().default(false),
   cookie: text('cookie'),
   csrfToken: text('csrf_token'),
+  useAi: integer('use_ai').notNull().default(2),
+  dailyWordLimit: integer('daily_word_limit').notNull().default(20000),
 });
 
 export const novelPlatform = sqliteTable(
@@ -63,6 +65,7 @@ export const novelPlatform = sqliteTable(
     bookId: text('book_id'),
     lastSyncedAt: integer('last_synced_at'),
     lastSyncError: text('last_sync_error'),
+    volumes: text('volumes'),
   },
   (t) => [primaryKey({ columns: [t.novelId, t.platformId] })],
 );
@@ -79,6 +82,8 @@ export const publication = sqliteTable(
     platformItemId: text('platform_item_id'),
     platformWordCount: integer('platform_word_count'),
     syncedAt: integer('synced_at'),
+    submittedAt: integer('submitted_at'),
+    quotaWords: integer('quota_words'),
   },
   (t) => [primaryKey({ columns: [t.chapterId, t.platformId] })],
 );

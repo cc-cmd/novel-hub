@@ -3,9 +3,11 @@ import { useState, useTransition } from 'react';
 import { deletePlatformAction, renamePlatformAction } from '@/app/actions/platforms';
 import { useNotice } from '@/components/notice';
 import { PlatformAuthPanel } from './platform-auth-panel';
+import { PublishSettingsPanel } from './publish-settings-panel';
 
-export function PlatformRow({ id, name, builtin, boundNovels, syncSupported, authSummary, authFailed }: {
+export function PlatformRow({ id, name, builtin, boundNovels, syncSupported, authSummary, authFailed, useAi, dailyWordLimit }: {
   id: number; name: string; builtin: boolean; boundNovels: number; syncSupported: boolean; authSummary: string | null; authFailed: boolean;
+  useAi: number; dailyWordLimit: number;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -54,7 +56,12 @@ export function PlatformRow({ id, name, builtin, boundNovels, syncSupported, aut
         )}
       </div>
       {error && <p className="text-sm text-red-700">{error}</p>}
-      {syncSupported ? <PlatformAuthPanel platformId={id} summary={authSummary} authFailed={authFailed} /> : (
+      {syncSupported ? (
+        <>
+          <PlatformAuthPanel platformId={id} summary={authSummary} authFailed={authFailed} />
+          <PublishSettingsPanel platformId={id} useAi={useAi} dailyWordLimit={dailyWordLimit} />
+        </>
+      ) : (
         <p className="text-xs text-stone-500">暂不支持自动校验</p>
       )}
     </li>

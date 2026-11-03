@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createFanqieClient, PlatformApiError, PlatformAuthError, PlatformFormatError, PlatformUnavailableError,
+  createFanqieClient, PlatformApiError, PlatformAuthError, PlatformFormatError, PlatformQuotaError, PlatformUnavailableError,
 } from './fanqie-client';
 
 const AUTH = { cookie: 'sessionid=SECRET-COOKIE', csrfToken: 'SECRET-CSRF' };
@@ -101,8 +101,8 @@ describe('错误分类', () => {
     await expect(run(() => ok({}))).rejects.toBeInstanceOf(PlatformFormatError);
   });
   it('其他非 0 code → PlatformApiError，文案含 code', async () => {
-    await expect(run(() => body(-1019))).rejects.toThrow('code=-1019');
-    await expect(run(() => body(-1019))).rejects.toBeInstanceOf(PlatformApiError);
+    await expect(run(() => body(-9999))).rejects.toThrow('code=-9999');
+    await expect(run(() => body(-9999))).rejects.toBeInstanceOf(PlatformApiError);
   });
   it('AC7.14 错误文案不含认证信息', async () => {
     for (const resp of [() => body(-1), () => new Response('', { status: 500 }), () => body(-1019), () => new Response('x')]) {
@@ -144,5 +144,50 @@ describe('getChapterHtml', () => {
     expect(await mk(() => ok({ article_info: { content: '<p>兜底</p>' } }))).toBe('<p>兜底</p>');
     expect(await mk(() => body(-2014, null, '审核中'))).toBeNull();
     await expect(mk(() => ok({}))).rejects.toBeInstanceOf(PlatformFormatError);
+  });
+});
+
+describe('写接口', () => {
+  function postFetch(respond: (path: string, form: URLSearchParams) => Response) {
+    const calls: Array<{ path: string; method: string; form: URLSearchParams; headers: Headers }> = [];
+    const f = (async (input: URL | string, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const form = new URLSearchParams(init?.method === 'POST' ? String(init.body) : url.search);
+      calls.push({ path: url.pathname, method: init?.method ?? 'GET', form, headers: new Headers(init?.headers) });
+      return respond(url.pathname, form);
+    }) as unknown as typeof fetch;
+    return { f, calls };
+  }
+
+  it('publishArticle：POST 表单编码，参数与技能一致', async () => {
+    const { f, calls } = postFetch(() => ok({}));
+    await createFanqieClient(AUTH, f).publishArticle({ bookId: 'B', itemId: 'I', title: '第1章 甲', html: '<p>a&amp;b</p>', volumeId: 'V', volumeName: '第一卷：崩塌', useAi: 2 });
+    const c = calls[0];
+    expect(c).toMatchObject({ path: '/api/author/publish_article/v0/', method: 'POST' });
+    expect(c.headers.get('content-type')).toContain('application/x-www-form-urlencoded');
+    expect(Object.fromEntries(c.form)).toMatchObject({
+      aid: '2503', app_name: 'muye_novel', item_id: 'I', book_id: 'B', title: '第1章 甲', content: '<p>a&amp;b</p>',
+      volume_id: 'V', volume_name: '第一卷：崩塌', use_ai: '2', publish_status: '1', timer_status: '0', need_pay: '0',
+    });
+  });
+
+  it('newDraft 返回 item_id；listVolumes 解析卷；addVolume 发 POST', async () => {
+    const { f, calls } = postFetch((p) =>
+      p.includes('new_article') ? ok({ item_id: 123 }) : p.includes('volume_list') ? ok({ volume_list: [{ volume_id: 1, volume_name: '第一卷' }, { volume_name: '无id' }] }) : ok({}));
+    const c = createFanqieClient(AUTH, f);
+    expect(await c.newDraft('B')).toBe('123');
+    expect(await c.listVolumes('B')).toEqual([{ volumeId: '1', volumeName: '第一卷' }]);
+    await c.addVolume('B', '第二卷');
+    expect(calls.map((x) => x.method)).toEqual(['POST', 'GET', 'POST']);
+    expect(calls[2].form.get('volume_name')).toBe('第二卷');
+  });
+
+  it('-1019 抛额度错误；其他非 0 码带 code 与 message', async () => {
+    const quota = postFetch(() => body(-1019, {}, '提交字数超出每日上限'));
+    await expect(createFanqieClient(AUTH, quota.f).newDraft('B')).rejects.toBeInstanceOf(PlatformQuotaError);
+    const other = postFetch(() => body(-4054, {}, '暂不支持创建多个无章节的分卷'));
+    const e = (await createFanqieClient(AUTH, other.f).addVolume('B', 'x').catch((x) => x)) as PlatformApiError;
+    expect(e).toBeInstanceOf(PlatformApiError);
+    expect(e.code).toBe(-4054);
   });
 });

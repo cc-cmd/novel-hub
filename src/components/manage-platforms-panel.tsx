@@ -1,6 +1,7 @@
 'use client';
 import { useState, useTransition } from 'react';
 import { bindPlatformAction, unbindPlatformAction } from '@/app/actions/platforms';
+import { setVolumeRulesAction } from '@/app/actions/publish';
 import { UserError } from '@/lib/result';
 import { parseFanqieBookId } from '@/lib/fanqie-url';
 import { fmtSyncTime, isAuthSyncError, syncErrorLabel } from '@/lib/sync-status';
@@ -9,6 +10,7 @@ import { useNotice } from './notice';
 interface Item {
   id: number; name: string; bound: boolean; bookUrl: string | null; publicationCount: number;
   syncSupported: boolean; hasAuth: boolean; configured: boolean; lastSyncedAt: number | null; lastSyncError: string | null;
+  volumeRules: string;
 }
 
 /** 输入时的即时提示（F7.3）；真正的校验在保存时由服务端完成。 */
@@ -92,6 +94,7 @@ function Row({ novelId, item }: { novelId: number; item: Item }) {
           {!error && <p className={`text-xs ${linkHint(url).warn ? 'text-orange-800' : 'text-stone-600'}`}>{linkHint(url).text}</p>}
           {!item.hasAuth && <p className="text-xs text-orange-900">未配置认证信息，不会同步状态。<a className="underline" href="/settings#fanqie">去设置</a></p>}
           {item.hasAuth && !item.bookUrl && <p className="text-xs text-orange-900">未填写作品链接，不会同步状态</p>}
+          <VolumeRulesEditor novelId={novelId} platformId={item.id} value={item.volumeRules} />
         </div>
       )}
       {item.bound && !item.syncSupported && (
@@ -113,5 +116,30 @@ function Row({ novelId, item }: { novelId: number; item: Item }) {
         </div>
       )}
     </li>
+  );
+}
+
+/** 分卷规则：发布时按章节区间选择平台分卷；平台上缺的卷会在发布时自动新建。 */
+function VolumeRulesEditor({ novelId, platformId, value }: { novelId: number; platformId: number; value: string }) {
+  const [text, setText] = useState(value);
+  const [error, setError] = useState('');
+  const [pending, start] = useTransition();
+  const { notify } = useNotice();
+  const save = () =>
+    start(async () => {
+      const r = await setVolumeRulesAction(novelId, platformId, text);
+      if (!r.ok) return setError(r.error);
+      notify({ kind: 'success', text: '已保存分卷规则' });
+    });
+  return (
+    <div className="space-y-1 pt-1">
+      <label className="block text-xs text-stone-600" htmlFor={`vol-${platformId}`}>分卷规则（发布用，每行「起始章-结束章 卷名」；平台只有一卷时可留空）</label>
+      <textarea id={`vol-${platformId}`} rows={3} className="w-full rounded border px-2 py-1 font-mono text-xs" placeholder={'1-50 第一卷：崩塌\n51-150 第二卷：暗战'}
+        value={text} onChange={(e) => { setText(e.target.value); setError(''); }} />
+      <div className="flex items-center gap-2">
+        <button className="rounded border px-3 text-sm" disabled={pending || text === value} onClick={save}>保存分卷规则</button>
+        {error && <span role="alert" className="text-xs font-medium text-red-700">{error}</span>}
+      </div>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
-import { useState, useTransition } from 'react';
-import { clearPlatformAuthAction, savePlatformAuthAction } from '@/app/actions/platforms';
+import { useEffect, useState, useTransition } from 'react';
+import { authCaptureStatusAction, clearPlatformAuthAction, importPlatformAuthAction, savePlatformAuthAction, startAuthCaptureAction } from '@/app/actions/platforms';
 import { useNotice } from '@/components/notice';
 
 /** 番茄认证信息。已保存时只显示掩码（服务端传入），原文永不回传到浏览器。 */
@@ -11,18 +11,44 @@ export function PlatformAuthPanel({ platformId, summary, authFailed }: { platfor
   const [cookie, setCookie] = useState('');
   const [csrf, setCsrf] = useState('');
   const [error, setError] = useState('');
+  const [envPath, setEnvPath] = useState('');
+  const [capturing, setCapturing] = useState(false);
   const [pending, start] = useTransition();
   const { notify } = useNotice();
+
+  const succeeded = () => { setEditing(false); setSaved(true); setCookie(''); setCsrf(''); setEnvPath(''); setError(''); };
+
+  // 一键获取：后台等待用户在专用 Chrome 中登录，这里每 2 秒查一次进度
+  useEffect(() => {
+    if (!capturing) return;
+    const t = setInterval(async () => {
+      const r = await authCaptureStatusAction(platformId);
+      if (!r.ok) return;
+      if (r.data.state === 'done') { setCapturing(false); succeeded(); }
+      if (r.data.state === 'error') { setCapturing(false); setError(r.data.message); }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [capturing, platformId]);
+
+  const capture = () =>
+    start(async () => {
+      setError('');
+      const r = await startAuthCaptureAction(platformId);
+      if (!r.ok) return setError(r.error);
+      setCapturing(true);
+    });
+  const importFile = () =>
+    start(async () => {
+      const r = await importPlatformAuthAction(platformId, envPath);
+      if (!r.ok) return setError(r.error);
+      succeeded();
+    });
 
   const save = () =>
     start(async () => {
       const r = await savePlatformAuthAction(platformId, cookie, csrf);
       if (!r.ok) return setError(r.error.includes('暂时无法访问') ? `${r.error}。认证信息未保存` : r.error);
-      setEditing(false);
-      setSaved(true);
-      setCookie('');
-      setCsrf('');
-      setError('');
+      succeeded();
     });
   const clear = () =>
     start(async () => {
@@ -31,7 +57,7 @@ export function PlatformAuthPanel({ platformId, summary, authFailed }: { platfor
       setSaved(false);
       if (!r.ok) notify({ kind: 'error', text: r.error });
     });
-  const cancel = () => { setEditing(false); setCookie(''); setCsrf(''); setError(''); };
+  const cancel = () => { setEditing(false); setCapturing(false); setCookie(''); setCsrf(''); setEnvPath(''); setError(''); };
 
   return (
     <div className="space-y-2 rounded border bg-stone-50 p-3 text-sm">
@@ -52,8 +78,25 @@ export function PlatformAuthPanel({ platformId, summary, authFailed }: { platfor
         </div>
       )}
       {editing && (
-        <div className="space-y-2">
-          <p className="text-xs text-stone-600">在已登录的番茄作家后台，从浏览器开发者工具中复制请求头。只保存在本机数据库，保存后不再显示原文。</p>
+        <div className="space-y-3">
+          <div className="space-y-1 rounded border bg-white p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button className="rounded bg-stone-900 px-3 py-1 font-medium text-white" disabled={pending || capturing} onClick={capture}>
+                {capturing ? '等待登录…' : '一键获取（推荐）'}
+              </button>
+              <span className="text-xs text-stone-600">会弹出一个专用 Chrome 窗口，在其中登录番茄作家后台即可，登录后自动读取并校验。</span>
+            </div>
+            {capturing && <p role="status" className="text-xs text-blue-900">请在弹出的 Chrome 窗口中登录（已登录过会自动完成），最多等待 5 分钟。</p>}
+          </div>
+          <div className="space-y-1">
+            <label className="block font-medium" htmlFor={`env-${platformId}`}>从文件导入</label>
+            <div className="flex gap-2">
+              <input id={`env-${platformId}`} className="flex-1 rounded border px-2 py-1 font-mono text-xs" placeholder="…/发布包/tools/.env.local（含 TOMATO_COOKIE、TOMATO_CSRF_TOKEN）"
+                value={envPath} onChange={(e) => { setEnvPath(e.target.value); setError(''); }} />
+              <button className="rounded border bg-white px-3" disabled={pending || capturing || !envPath.trim()} onClick={importFile}>导入并校验</button>
+            </div>
+          </div>
+          <p className="text-xs text-stone-600">或手动填写：在已登录的番茄作家后台，从浏览器开发者工具中复制请求头。只保存在本机数据库，保存后不再显示原文。</p>
           <label className="block font-medium">Cookie
             <textarea className="mt-1 w-full rounded border px-2 py-1 font-mono text-xs font-normal" rows={3} autoComplete="off" spellCheck={false} value={cookie}
               onChange={(e) => { setCookie(e.target.value); setError(''); }} />
@@ -64,7 +107,7 @@ export function PlatformAuthPanel({ platformId, summary, authFailed }: { platfor
           </label>
           {error && <p role="alert" className="font-medium text-red-700">{error}</p>}
           <div className="flex gap-2">
-            <button className="rounded bg-stone-900 px-3 py-1 font-medium text-white" disabled={pending} onClick={save}>{pending ? '校验中…' : '保存并校验'}</button>
+            <button className="rounded border bg-white px-3 py-1 font-medium" disabled={pending || capturing} onClick={save}>{pending ? '校验中…' : '保存并校验'}</button>
             <button className="rounded border bg-white px-3" onClick={cancel}>取消</button>
           </div>
         </div>

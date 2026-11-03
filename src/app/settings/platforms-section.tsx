@@ -16,6 +16,7 @@ export function PlatformsSection() {
             key={p.id} id={p.id} name={p.name} builtin={p.builtin} boundNovels={p.boundNovels}
             syncSupported={p.name === SYNC_PLATFORM} authSummary={authSummaryOf(p)}
             authFailed={p.name === SYNC_PLATFORM && hasAuthFailure(db, p.id)}
+            useAi={p.useAi} dailyWordLimit={p.dailyWordLimit}
           />
         ))}
       </ul>

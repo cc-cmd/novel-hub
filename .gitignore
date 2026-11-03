@@ -11,3 +11,6 @@ tsconfig.tsbuildinfo
 src/test/fixtures/fanqie/ch01.*
 src/test/fixtures/fanqie/ch03.*
 src/test/fixtures/fanqie/ch05.*
+
+# 一键获取认证用的专用 Chrome 用户目录（含番茄登录态）
+data/chrome-profile/

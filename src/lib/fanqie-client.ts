@@ -17,7 +17,11 @@ export class PlatformFormatError extends UserError {
   constructor() { super('番茄返回格式无法识别，接口可能已变更'); }
 }
 export class PlatformApiError extends UserError {
-  constructor(code: number) { super(`番茄接口返回错误（code=${code}）`); }
+  constructor(public code: number, message = '') { super(`番茄接口返回错误（code=${code}${message ? `，${message}` : ''}）`); }
+}
+/** -1019：当日提交字数已达上限（约 2 万字，0 点重置）。 */
+export class PlatformQuotaError extends UserError {
+  constructor() { super('今日提交字数已达番茄上限，0 点后再发'); }
 }
 
 export interface RemoteChapter { itemId: string; title: string; wordNumber: number; displayStatus: number }
@@ -29,21 +33,47 @@ export interface FanqieClient {
 }
 export type ClientFactory = (db: Db, platformId: number) => FanqieClient;
 
+export interface PublishArticleInput {
+  bookId: string;
+  itemId: string;
+  title: string;
+  html: string;
+  volumeId: string;
+  volumeName: string;
+  useAi: number;
+}
+/** 写接口（发布 / 覆盖 / 建卷）。与只读的 FanqieClient 分开，测试替身只需实现用到的部分。 */
+export interface FanqiePublisher extends FanqieClient {
+  listVolumes(bookId: string): Promise<Array<{ volumeId: string; volumeName: string }>>;
+  addVolume(bookId: string, volumeName: string): Promise<void>;
+  /** 新建空草稿，返回 item_id */
+  newDraft(bookId: string): Promise<string>;
+  /** 发布；同一 item_id 再次发布即覆盖（章节会回到审核中） */
+  publishArticle(input: PublishArticleInput): Promise<void>;
+}
+export type PublisherFactory = (db: Db, platformId: number) => FanqiePublisher;
+
 type Json = Record<string, unknown>;
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null;
 
-export function createFanqieClient(auth: { cookie: string; csrfToken: string }, fetchImpl: typeof fetch = fetch): FanqieClient {
-  /** GET 调用。code=0 或在 okCodes 内返回 {code, data}；-1/未授权抛认证错误；其余抛 ApiError。 */
-  async function call(path: string, params: Record<string, string | number>, okCodes: number[] = []) {
+export function createFanqieClient(auth: { cookie: string; csrfToken: string }, fetchImpl: typeof fetch = fetch): FanqiePublisher {
+  /** GET（参数在查询串）或 POST（表单编码，同 pipeline.py）。code=0 或在 okCodes 内返回 {code, data}；
+   *  -1/未授权抛认证错误；-1019 抛额度错误；其余抛 ApiError。 */
+  async function call(path: string, params: Record<string, string | number>, okCodes: number[] = [], method: 'GET' | 'POST' = 'GET') {
     const url = new URL(path, BASE);
-    url.searchParams.set('aid', '2503');
-    url.searchParams.set('app_name', 'muye_novel');
-    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+    const form = new URLSearchParams({ aid: '2503', app_name: 'muye_novel' });
+    for (const [k, v] of Object.entries(params)) form.set(k, String(v));
+    if (method === 'GET') url.search = form.toString();
     let res: Response;
     try {
       res = await fetchImpl(url, {
-        headers: { Cookie: auth.cookie, 'X-Secsdk-Csrf-Token': auth.csrfToken, Accept: 'application/json' },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        method,
+        headers: {
+          Cookie: auth.cookie, 'X-Secsdk-Csrf-Token': auth.csrfToken, Accept: 'application/json',
+          ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', Origin: BASE, Referer: `${BASE}/main/writer/` } : {}),
+        },
+        body: method === 'POST' ? form.toString() : undefined,
+        signal: AbortSignal.timeout(method === 'POST' ? 30_000 : TIMEOUT_MS),
       });
     } catch {
       throw new PlatformUnavailableError();
@@ -61,7 +91,8 @@ export function createFanqieClient(auth: { cookie: string; csrfToken: string }, 
     if (!isObj(json) || typeof json.code !== 'number') throw new PlatformFormatError();
     const code = json.code;
     if (code === -1 || (code !== 0 && /登录|未授权/.test(String(json.message ?? '')))) throw new PlatformAuthError();
-    if (code !== 0 && !okCodes.includes(code)) throw new PlatformApiError(code);
+    if (code === -1019) throw new PlatformQuotaError();
+    if (code !== 0 && !okCodes.includes(code)) throw new PlatformApiError(code, String(json.message ?? ''));
     return { code, data: json.data };
   }
 
@@ -128,6 +159,34 @@ export function createFanqieClient(auth: { cookie: string; csrfToken: string }, 
       const html = typeof d.content === 'string' ? d.content : isObj(d.article_info) && typeof d.article_info.content === 'string' ? d.article_info.content : null;
       if (html === null) throw new PlatformFormatError();
       return html;
+    },
+
+    async listVolumes(bookId) {
+      const { data } = await call('/api/author/volume/volume_list/v1', { book_id: bookId });
+      return arrayAt(data, 'volume_list')
+        .map((v) => ({ volumeId: String(v.volume_id ?? ''), volumeName: String(v.volume_name ?? '') }))
+        .filter((v) => v.volumeId);
+    },
+
+    async addVolume(bookId, volumeName) {
+      await call('/api/author/volume/add_volume/v0', { book_id: bookId, volume_name: volumeName }, [], 'POST');
+    },
+
+    async newDraft(bookId) {
+      const { data } = await call('/api/author/article/new_article/v0/', { book_id: bookId, need_reuse: 0 }, [], 'POST');
+      const id = isObj(data) ? String(data.item_id ?? '') : '';
+      if (!id) throw new PlatformFormatError();
+      return id;
+    },
+
+    async publishArticle(i) {
+      // 参数与 fanqie-publish 技能实测可用的一致（references/platform-facts.md）
+      await call('/api/author/publish_article/v0/', {
+        item_id: i.itemId, book_id: i.bookId, content: i.html, title: i.title,
+        volume_id: i.volumeId, volume_name: i.volumeName,
+        timer_status: 0, timer_time: 0, publish_status: 1, need_pay: 0, use_ai: i.useAi,
+        device_platform: 'pc', speak_type: 0, timer_chapter_preview: '[]', has_chapter_ad: 'false', chapter_ad_types: '',
+      }, [], 'POST');
     },
   };
 }

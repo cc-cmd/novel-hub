@@ -8,6 +8,7 @@ import { ManagePlatformsPanel } from '@/components/manage-platforms-panel';
 import { MatrixTable } from '@/components/matrix-table';
 import { MatrixToolbar } from '@/components/matrix-toolbar';
 import { ProblemFiles } from '@/components/problem-files';
+import { PublishPanel } from '@/components/publish-panel';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { SyncStrip } from '@/components/sync-strip';
 import { RescanNovelButton } from '@/components/rescan-novel-button';
@@ -67,7 +68,7 @@ export default async function NovelPage({
           bindings={bindings.map((b) => ({
             id: b.platform.id, name: b.platform.name, bound: b.bound, bookUrl: b.bookUrl, publicationCount: b.publicationCount,
             syncSupported: b.syncSupported, hasAuth: b.hasAuth, configured: b.configured,
-            lastSyncedAt: b.lastSyncedAt, lastSyncError: b.lastSyncError,
+            lastSyncedAt: b.lastSyncedAt, lastSyncError: b.lastSyncError, volumeRules: b.volumeRules,
           }))}
         />
         </div>
@@ -76,6 +77,10 @@ export default async function NovelPage({
       {fanqie && !fanqie.configured && <SetupChecklist hasAuth={fanqie.hasAuth} hasLink={!!fanqie.bookUrl} />}
       {fanqiePlatform?.configured && (
         <SyncStrip lastSyncedAt={fanqiePlatform.lastSyncedAt} lastSyncError={fanqiePlatform.lastSyncError} changedCount={matrix.changedCount} />
+      )}
+
+      {fanqiePlatform?.configured && all.length > 0 && (
+        <PublishPanel novelId={n.id} platformId={fanqiePlatform.id} platformName={fanqiePlatform.name} />
       )}
 
       <ProblemFiles problems={problems} />

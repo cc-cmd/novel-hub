@@ -3,6 +3,7 @@ import type { Db } from '@/db';
 import { chapter, novelPlatform, platform, publication, type Platform } from '@/db/schema';
 import { parseFanqieBookId } from './fanqie-url';
 import { UserError } from './result';
+import { formatVolumeRules, loadVolumeRules } from './volumes';
 
 function cleanName(input: string, selfId?: number, db?: Db): string {
   const name = input.trim();
@@ -116,6 +117,8 @@ export interface Binding {
   configured: boolean;
   lastSyncedAt: number | null;
   lastSyncError: string | null;
+  /** 分卷规则（编辑用文本，每行一条） */
+  volumeRules: string;
 }
 
 export function listBindings(db: Db, novelId: number): Binding[] {
@@ -142,6 +145,7 @@ export function listBindings(db: Db, novelId: number): Binding[] {
         configured: !!link && isSyncConfigured({ name: p.name, cookie: p.cookie, csrfToken: p.csrfToken, bookId: link.bookId }),
         lastSyncedAt: link?.lastSyncedAt ?? null,
         lastSyncError: link?.lastSyncError ?? null,
+        volumeRules: formatVolumeRules(loadVolumeRules(link?.volumes ?? null)),
       };
     });
 }

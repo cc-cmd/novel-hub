@@ -107,6 +107,17 @@ export function buildPublishForm(markdown: string, seq: number, fallbackTitle: s
   return { title: platformTitle(seq, resolveTitle(markdown, fallbackTitle).title), body: toPublishBody(markdown) };
 }
 
+/** 发布形态正文 → 平台 HTML：每个非空行一个 <p>，转义 & < > " '（同 pipeline.py 的 to_html）。 */
+export function toPublishHtml(body: string): string {
+  const esc: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' };
+  return body
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => `<p>${l.replace(/[&<>"']/g, (c) => esc[c])}</p>`)
+    .join('');
+}
+
 export function countWords(body: string): number {
   return [...body.replace(/\s/g, '')].length;
 }

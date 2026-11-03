@@ -1,17 +1,19 @@
+import fs from 'node:fs';
 import { eq } from 'drizzle-orm';
 import type { Db } from '@/db';
 import { novelPlatform, platform } from '@/db/schema';
 import { parseFanqieBookId } from './fanqie-url';
-import { createFanqieClient, PlatformAuthError, type ClientFactory, type FanqieClient } from './fanqie-client';
+import { createFanqieClient, PlatformAuthError, type ClientFactory, type FanqieClient, type PublisherFactory } from './fanqie-client';
 import { bindPlatform, SYNC_PLATFORM } from './platforms';
 import { UserError } from './result';
 import { isAuthSyncError } from './sync-status';
 
-export const clientForPlatform: ClientFactory = (db, platformId) => {
+export const publisherForPlatform: PublisherFactory = (db, platformId) => {
   const p = db.select().from(platform).where(eq(platform.id, platformId)).get();
   if (!p?.cookie || !p.csrfToken) throw new PlatformAuthError();
   return createFanqieClient({ cookie: p.cookie, csrfToken: p.csrfToken });
 };
+export const clientForPlatform: ClientFactory = publisherForPlatform;
 
 export function authSummaryOf(p: { cookie: string | null }): string | null {
   return p.cookie ? `已配置 · 末4位 ${p.cookie.slice(-4)}` : null;
@@ -39,6 +41,36 @@ export async function saveFanqieAuth(
   await createClient({ cookie, csrfToken }).listBookIds();
   db.update(platform).set({ cookie, csrfToken }).where(eq(platform.id, platformId)).run();
   clearSyncErrors(db, platformId); // 认证已更新，旧的失败记录不再成立
+}
+
+/** 解析 fanqie-publish 技能的 .env.local（`TOMATO_COOKIE=` / `TOMATO_CSRF_TOKEN=`），规则同 pipeline.py 的 load_env。 */
+export function parseEnvAuth(text: string): { cookie: string; csrfToken: string } {
+  const env: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (m && !(m[1] in env)) env[m[1]] = m[2].replace(/^["']+|["']+$/g, '');
+  }
+  const missing = ['TOMATO_COOKIE', 'TOMATO_CSRF_TOKEN'].filter((k) => !env[k]);
+  if (missing.length) throw new UserError(`文件中缺少 ${missing.join('、')}`);
+  return { cookie: env.TOMATO_COOKIE, csrfToken: env.TOMATO_CSRF_TOKEN };
+}
+
+/** 从本机文件导入并校验。报错信息只含路径与键名，不含认证原文。 */
+export async function importFanqieAuthFromFile(
+  db: Db,
+  platformId: number,
+  filePath: string,
+  createClient?: (auth: { cookie: string; csrfToken: string }) => FanqieClient,
+): Promise<void> {
+  const p = filePath.trim();
+  if (!p) throw new UserError('请填写文件路径');
+  let text: string;
+  try {
+    text = fs.readFileSync(p, 'utf8');
+  } catch {
+    throw new UserError(`无法读取文件：${p}`);
+  }
+  await saveFanqieAuth(db, platformId, parseEnvAuth(text), createClient);
 }
 
 function clearSyncErrors(db: Db, platformId: number): void {

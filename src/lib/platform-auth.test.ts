@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { novelPlatform, platform } from '@/db/schema';
-import { insertNovel, makeDb } from '@/test/helpers';
+import { insertNovel, makeDb, makeTmpDir } from '@/test/helpers';
 import { PlatformAuthError, type FanqieClient } from './fanqie-client';
-import { authSummaryOf, bindPlatformChecked, clearAuth, saveFanqieAuth } from './platform-auth';
+import { authSummaryOf, bindPlatformChecked, clearAuth, importFanqieAuthFromFile, parseEnvAuth, saveFanqieAuth } from './platform-auth';
 import { listPlatforms } from './platforms';
 
 const SAMPLE = 'https://fanqienovel.com/main/writer/chapter-manage/7670888040847395864&坏人?type=1';
@@ -87,5 +87,26 @@ describe('bindPlatformChecked', () => {
     await bindPlatformChecked(s.db, s.n.id, s.qidian.id, 'https://book.qidian.com/x', () => { throw new Error('不应联网'); });
     expect(link(s)).toMatchObject({ bookUrl: 'https://book.qidian.com/x', bookId: null });
     await expect(bindPlatformChecked(s.db, s.n.id, s.qidian.id, 'nope', () => client([]))).rejects.toThrow('作品主页链接格式错误');
+  });
+});
+
+describe('importFanqieAuthFromFile', () => {
+  it('解析技能 .env.local（引号、注释行、首个值优先）', () => {
+    expect(parseEnvAuth('# x\nTOMATO_COOKIE="a=1; b=2"\nTOMATO_CSRF_TOKEN=\'tok\'\nTOMATO_COOKIE=late\nTOMATO_BOOK_ID=9\n'))
+      .toEqual({ cookie: 'a=1; b=2', csrfToken: 'tok' });
+    expect(() => parseEnvAuth('TOMATO_COOKIE=c\n')).toThrow('缺少 TOMATO_CSRF_TOKEN');
+  });
+  it('读取文件、校验后保存；报错不含认证原文', async () => {
+    const s = setup();
+    const { dir, cleanup } = makeTmpDir({ '.env.local': 'TOMATO_COOKIE=secret-cookie\nTOMATO_CSRF_TOKEN=secret-tok\n' });
+    try {
+      await importFanqieAuthFromFile(s.db, s.fanqie.id, `${dir}/.env.local`, () => client(['1']));
+      expect(row(s.db, s.fanqie.id)).toMatchObject({ cookie: 'secret-cookie', csrfToken: 'secret-tok' });
+      const err = (await importFanqieAuthFromFile(s.db, s.fanqie.id, `${dir}/.env.local`, () => client(new PlatformAuthError())).catch((e) => e)) as Error;
+      expect(err.message).not.toMatch(/secret/);
+      await expect(importFanqieAuthFromFile(s.db, s.fanqie.id, `${dir}/nope`)).rejects.toThrow('无法读取文件');
+    } finally {
+      cleanup();
+    }
   });
 });
